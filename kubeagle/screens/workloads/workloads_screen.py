@@ -79,15 +79,6 @@ class _WorkloadsFilterState(TypedDict):
     pdb_filter_values: set[str]
 
 
-class _WorkloadsQueryFilters(TypedDict):
-    name_filter_values: set[str]
-    kind_filter_values: set[str]
-    helm_release_filter_values: set[str]
-    namespace_filter_values: set[str]
-    status_filter_values: set[str]
-    pdb_filter_values: set[str]
-
-
 class _WorkloadsFiltersModal(ModalScreen[_WorkloadsFilterState | None]):
     """Modal for namespace/status/PDB filters."""
 
@@ -1691,7 +1682,7 @@ class WorkloadsScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scr
     def _tooltips_for_tab(self, tab_id: str) -> dict[str, str]:
         return WORKLOADS_HEADER_TOOLTIPS_BY_TAB[tab_id]
 
-    def _current_filter_kwargs(self) -> _WorkloadsQueryFilters:
+    def _current_filter_kwargs(self) -> _WorkloadsFilterState:
         return {
             "name_filter_values": self._name_filter_values,
             "kind_filter_values": self._kind_filter_values,
@@ -1914,21 +1905,13 @@ class WorkloadsScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scr
     def _refresh_summary(
         self,
         *,
-        filtered_workloads: list[Any] | None = None,
-        scoped_total: int | None = None,
+        filtered_workloads: list[Any],
+        scoped_total: int,
     ) -> None:
-        if filtered_workloads is not None and scoped_total is not None:
-            summary = self._presenter.build_resource_summary_from_filtered(
-                filtered_workloads=filtered_workloads,
-                scoped_total=scoped_total,
-            )
-        else:
-            filter_kwargs = self._current_filter_kwargs()
-            summary = self._presenter.build_resource_summary(
-                workload_view_filter=self._active_view_filter(),
-                search_query=self._search_query,
-                **filter_kwargs,
-            )
+        summary = self._presenter.build_resource_summary_from_filtered(
+            filtered_workloads=filtered_workloads,
+            scoped_total=scoped_total,
+        )
         missing_cpu = summary.get("missing_cpu_request", "0")
         missing_mem = summary.get("missing_memory_request", "0")
         extreme = summary.get("extreme_ratios", "0")

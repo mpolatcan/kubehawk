@@ -162,15 +162,6 @@ class ViewFilter(Enum):
     WITH_VIOLATIONS = "with_violations"
 
 
-class GroupBy(Enum):
-    """Grouping modes for Charts Explorer table."""
-
-    NONE = "none"
-    BY_TEAM = "by_team"
-    BY_QOS = "by_qos"
-    BY_VALUES_FILE = "by_values_file"
-
-
 class SortBy(Enum):
     """Sort modes for Charts Explorer table."""
 
@@ -223,7 +214,6 @@ __all__ = [
     "NavigationMode",
     "SortField",
     "ViewFilter",
-    "GroupBy",
     "SortBy",
     "WidgetCategory",
 ]

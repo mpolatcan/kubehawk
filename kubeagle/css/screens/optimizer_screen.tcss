@@ -77,8 +77,8 @@ OptimizerScreen {
     height: auto;
     min-height: 6;
     layout: grid;
-    grid-size: 3 1;
-    grid-columns: 48fr 40fr 33fr;
+    grid-size: 4 1;
+    grid-columns: 38fr 30fr 25fr 20fr;
     grid-gutter: 1 0;
     content-align: left top;
     overflow-x: hidden;
@@ -328,8 +328,8 @@ OptimizerScreen {
 /* --- Breakpoints: violations filter controls --- */
 #filter-bar.ultra #filter-row {
     layout: grid;
-    grid-size: 3 1;
-    grid-columns: 50fr 38fr 34fr;
+    grid-size: 4 1;
+    grid-columns: 38fr 30fr 25fr 20fr;
     grid-gutter: 2 0;
     min-height: 6;
 }
@@ -350,8 +350,8 @@ OptimizerScreen {
 
 #filter-bar.wide #filter-row {
     layout: grid;
-    grid-size: 3 1;
-    grid-columns: 48fr 40fr 33fr;
+    grid-size: 4 1;
+    grid-columns: 38fr 30fr 25fr 20fr;
     grid-gutter: 1 0;
     min-height: 6;
 }
@@ -393,8 +393,8 @@ OptimizerScreen {
 
 #filter-bar.medium #filter-row {
     layout: grid;
-    grid-size: 3 1;
-    grid-columns: 1fr 1fr 1fr;
+    grid-size: 4 1;
+    grid-columns: 1fr 1fr 1fr 1fr;
     grid-gutter: 1 0;
     min-height: 6;
     overflow-x: hidden;
@@ -2476,4 +2476,193 @@ Select.cluster-tab-order {
     background: $surface;
     border: dashed $surface-lighten-2;
     margin: 1;
+}
+
+/* ============================================================================ */
+/* Resource Impact Analysis View                                                */
+/* ============================================================================ */
+
+#resource-impact-view {
+    height: 1fr;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 1;
+}
+
+/* --- Savings Banner --- */
+
+#impact-savings-banner {
+    height: auto;
+    min-height: 0;
+    padding: 1 2;
+    margin: 0 0 1 0;
+    background: $surface-darken-2;
+    border: heavy $surface-lighten-1;
+}
+
+#impact-savings-banner.banner-savings {
+    border: heavy $success;
+    background: $success 8%;
+}
+
+#impact-savings-banner.banner-increase {
+    border: heavy $warning;
+    background: $warning 8%;
+}
+
+#impact-savings-banner .isb-text {
+    width: 1fr;
+    height: auto;
+    min-height: 0;
+    content-align: left middle;
+}
+
+#impact-savings-banner .isb-label {
+    text-style: bold;
+    color: $text;
+    width: 100%;
+}
+
+#impact-savings-banner .isb-sublabel {
+    color: $text-muted;
+    width: 100%;
+}
+
+#impact-savings-banner #impact-savings-digits {
+    width: auto;
+    min-width: 16;
+    height: auto;
+    min-height: 0;
+    color: $text;
+}
+
+#impact-savings-banner.banner-savings #impact-savings-digits {
+    color: $success;
+}
+
+#impact-savings-banner.banner-increase #impact-savings-digits {
+    color: $warning;
+}
+
+/* --- Metric Card Rows --- */
+
+#impact-kpi-row-1,
+#impact-kpi-row-2 {
+    height: auto;
+    min-height: 0;
+    margin: 0 0 1 0;
+    padding: 0;
+    layout: grid;
+    grid-size: 3 1;
+    grid-columns: 1fr 1fr 1fr;
+    grid-gutter: 1 0;
+}
+
+/* --- Impact Metric Cards --- */
+
+.impact-metric-card {
+    height: auto;
+    width: 1fr;
+    min-width: 0;
+    padding: 1;
+    border: solid $surface-lighten-1;
+    background: $surface;
+    content-align: center middle;
+}
+
+.impact-metric-card.impact-warning {
+    border-top: heavy $warning;
+    background: $warning 4%;
+}
+
+.impact-metric-card.impact-success {
+    border-top: heavy $success;
+    background: $success 4%;
+}
+
+.impact-metric-card.impact-neutral {
+    border-top: heavy $surface-lighten-2;
+}
+
+.impact-metric-card .imc-title {
+    text-style: bold;
+    color: $secondary;
+    text-align: center;
+    width: 100%;
+}
+
+.impact-metric-card .imc-delta {
+    text-style: bold;
+    text-align: center;
+    width: 100%;
+    margin: 1 0 0 0;
+}
+
+.impact-metric-card.impact-warning .imc-delta {
+    color: $warning;
+}
+
+.impact-metric-card.impact-success .imc-delta {
+    color: $success;
+}
+
+.impact-metric-card.impact-neutral .imc-delta {
+    color: $text;
+}
+
+.impact-metric-card .imc-pct {
+    text-align: center;
+    width: 100%;
+    color: $text-muted;
+}
+
+.impact-metric-card .imc-range {
+    text-align: center;
+    width: 100%;
+    color: $text-disabled;
+    margin-top: 1;
+}
+
+/* --- Impact Section Cards (tables) --- */
+
+.impact-section {
+    border: round $surface-lighten-1 40%;
+    background: $surface-darken-1;
+    padding: 1;
+    margin-bottom: 1;
+    height: auto;
+    min-height: 0;
+}
+
+.impact-section-title {
+    width: 1fr;
+    min-width: 0;
+    color: $text;
+    text-style: bold;
+    text-align: center;
+    content-align: center middle;
+    padding: 0 1;
+    background: $surface-darken-2;
+    border-left: heavy $primary;
+    border-bottom: none;
+    margin-bottom: 1;
+}
+
+/* --- Impact Tables --- */
+
+#impact-cluster-node-table,
+#impact-node-table,
+#impact-chart-table {
+    height: auto;
+    min-height: 3;
+    max-height: 24;
+}
+
+/* Chart table empty state */
+#impact-chart-empty {
+    text-align: center;
+    content-align: center middle;
+    padding: 2 0;
+    display: none;
 }

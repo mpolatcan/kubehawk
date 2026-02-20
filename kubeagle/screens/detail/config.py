@@ -64,10 +64,77 @@ SORT_SELECT_OPTIONS: list[tuple[str, str]] = [
 # Optimizer view switching
 VIEW_VIOLATIONS: str = "violations"
 VIEW_RECOMMENDATIONS: str = "recommendations"
+VIEW_IMPACT: str = "impact"
 VIEW_OPTIONS: list[tuple[str, str]] = [
     ("Optimizer", VIEW_VIOLATIONS),
-    ("Recommendations", VIEW_RECOMMENDATIONS),
+    ("Impact Analysis", VIEW_IMPACT),
 ]
+
+# Impact analysis table columns
+IMPACT_NODE_TABLE_COLUMNS: list[tuple[str, int]] = [
+    ("Instance Type", 16),
+    ("vCPUs", 8),
+    ("Memory", 12),
+    ("Spot $/hr", 10),
+    ("Nodes Before", 14),
+    ("Nodes After", 14),
+    ("Reduction", 10),
+    ("%", 8),
+    ("Cost Before", 14),
+    ("Cost After", 14),
+    ("Cost Δ/mo", 14),
+]
+
+IMPACT_CHART_TABLE_COLUMNS: list[tuple[str, int]] = [
+    ("Chart", 22),
+    ("Team", 16),
+    ("CPU Req B->A", 20),
+    ("CPU Lim B->A", 20),
+    ("Mem Req B->A", 20),
+    ("Mem Lim B->A", 20),
+    ("Replicas", 14),
+]
+
+IMPACT_CLUSTER_NODE_TABLE_COLUMNS: list[tuple[str, int]] = [
+    ("Instance Type", 16),
+    ("Nodes", 8),
+    ("CPU/Node", 12),
+    ("Mem/Node", 12),
+    ("Spot $/hr", 10),
+    ("Needed After", 12),
+    ("Reduction", 10),
+    ("%", 8),
+    ("Cost Now/mo", 14),
+    ("Cost After/mo", 14),
+    ("Cost Δ/mo", 14),
+]
+
+IMPACT_HEADER_TOOLTIPS: dict[str, str] = {
+    "Instance Type": "Instance type from the live cluster or estimation.",
+    "vCPUs": "Number of virtual CPUs on the instance.",
+    "Memory": "Total memory on the instance.",
+    "Spot $/hr": "EC2 spot price per hour (us-east-1 approximate).",
+    "Nodes Before": "Estimated nodes required before optimization.",
+    "Nodes After": "Estimated nodes required after optimization.",
+    "Nodes": "Current number of nodes of this type in the cluster.",
+    "CPU/Node": "Allocatable CPU per node (millicores).",
+    "Mem/Node": "Allocatable memory per node.",
+    "Needed After": "Estimated nodes needed after applying optimizations.",
+    "Reduction": "Number of nodes saved by optimization.",
+    "%": "Percentage reduction in nodes.",
+    "Cost Before": "Estimated monthly spot cost before optimization.",
+    "Cost After": "Estimated monthly spot cost after optimization.",
+    "Cost Now/mo": "Current monthly spot cost for this node group.",
+    "Cost After/mo": "Estimated monthly spot cost after optimization.",
+    "Cost Δ/mo": "Monthly cost change: +$X = cost increase, -$X = cost saved.",
+    "Chart": "Helm chart name with resource changes.",
+    "Team": "Owning team of the chart.",
+    "CPU Req B->A": "CPU request per replica: before -> after.",
+    "CPU Lim B->A": "CPU limit per replica: before -> after.",
+    "Mem Req B->A": "Memory request per replica: before -> after.",
+    "Mem Lim B->A": "Memory limit per replica: before -> after.",
+    "Replicas": "Replica count: before -> after.",
+}
 
 # Fixes table columns
 FIXES_TABLE_COLUMNS: list[tuple[str, int]] = [

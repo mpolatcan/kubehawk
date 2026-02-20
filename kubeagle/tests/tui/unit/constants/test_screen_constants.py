@@ -6,7 +6,7 @@ Tests cover:
 - constants/screens/settings.py: Section headers, validation messages, button labels
 - constants/screens/detail.py: Optimizer categories/severities, button/filter labels
 - constants/screens/common.py: Theme names (DARK_THEME, LIGHT_THEME)
-- constants/screens/charts_explorer.py: Screen title, search/button labels, thresholds
+- constants/screens/charts_explorer.py: Screen title, search/button labels
 - constants/screens/__init__.py: Re-exports
 """
 
@@ -322,10 +322,7 @@ class TestChartsExplorerConstants:
 
     def test_button_labels_import(self) -> None:
         from kubeagle.constants.screens.charts_explorer import (
-            BUTTON_ACTIVE_OFF,
-            BUTTON_ACTIVE_ON,
             BUTTON_CLEAR,
-            BUTTON_COLUMNS,
             BUTTON_FILTER,
             BUTTON_MODE_CLUSTER,
             BUTTON_MODE_LOCAL,
@@ -335,29 +332,6 @@ class TestChartsExplorerConstants:
         assert isinstance(BUTTON_CLEAR, str)
         assert isinstance(BUTTON_MODE_LOCAL, str)
         assert isinstance(BUTTON_MODE_CLUSTER, str)
-        assert isinstance(BUTTON_ACTIVE_OFF, str)
-        assert isinstance(BUTTON_ACTIVE_ON, str)
-        assert isinstance(BUTTON_COLUMNS, str)
-
-    def test_extreme_ratios_threshold_import(self) -> None:
-        from kubeagle.constants.screens.charts_explorer import (
-            EXTREME_RATIOS_THRESHOLD,
-        )
-
-        assert EXTREME_RATIOS_THRESHOLD == 2.0
-
-    def test_mode_constants_import(self) -> None:
-        from kubeagle.constants.screens.charts_explorer import (
-            MODE_CLUSTER,
-            MODE_LOCAL,
-            STATUS_LIVE_HELM,
-            STATUS_LOCAL_FILES,
-        )
-
-        assert isinstance(MODE_LOCAL, str)
-        assert isinstance(MODE_CLUSTER, str)
-        assert isinstance(STATUS_LOCAL_FILES, str)
-        assert isinstance(STATUS_LIVE_HELM, str)
 
     def test_charts_explorer_title_in_screens_init(self) -> None:
         from kubeagle.constants.screens import CHARTS_EXPLORER_TITLE

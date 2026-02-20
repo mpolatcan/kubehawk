@@ -5,7 +5,7 @@ This module tests:
 - apply_filters() with all ViewFilter modes
 - sort_charts() with all SortBy modes
 - format_chart_row() column output
-- build_summary() text generation
+- build_summary_metrics() numeric summary
 - Helper methods (_format_memory, _format_ratio, _build_probes_str, _is_extreme_ratio)
 
 Tests use mock ChartInfo objects to isolate presenter from real data.
@@ -537,58 +537,59 @@ class TestFormatChartRow:
 
 
 # =============================================================================
-# build_summary Tests
+# build_summary_metrics Tests
 # =============================================================================
 
 
-class TestBuildSummary:
-    """Test ChartsExplorerPresenter.build_summary()."""
+class TestBuildSummaryMetrics:
+    """Test ChartsExplorerPresenter.build_summary_metrics()."""
 
     def test_shows_chart_counts(self) -> None:
-        """Test summary includes shown/total chart counts."""
+        """Test summary metrics include shown/total chart counts."""
         presenter = ChartsExplorerPresenter()
         all_charts = [_make_chart(name="a"), _make_chart(name="b")]
         filtered = [_make_chart(name="a")]
-        result = presenter.build_summary(all_charts, filtered, ViewFilter.ALL)
-        assert "1/2 charts" in result
+        metrics = presenter.build_summary_metrics(all_charts, filtered)
+        assert metrics["total"] == 2
+        assert metrics["shown"] == 1
 
-    def test_shows_violation_count(self) -> None:
-        """Test summary includes violation count when present."""
+    def test_tracks_violation_count(self) -> None:
+        """Test summary metrics include violation count when present."""
         presenter = ChartsExplorerPresenter()
         presenter.set_violations({"a": 3, "b": 2})
         charts = [_make_chart(name="a")]
-        result = presenter.build_summary(charts, charts, ViewFilter.ALL)
-        assert "5" in result
-        assert "violations" in result
+        metrics = presenter.build_summary_metrics(charts, charts)
+        assert metrics["violations"] == 5
 
-    def test_no_violations_omits_section(self) -> None:
-        """Test summary omits violations when none exist."""
+    def test_no_violations_returns_zero(self) -> None:
+        """Test summary metrics return zero violations when none exist."""
         presenter = ChartsExplorerPresenter()
         charts = [_make_chart(name="a")]
-        result = presenter.build_summary(charts, charts, ViewFilter.ALL)
-        assert "violations" not in result
+        metrics = presenter.build_summary_metrics(charts, charts)
+        assert metrics["violations"] == 0
 
-    def test_shows_cpu_totals(self) -> None:
-        """Test summary includes CPU totals."""
+    def test_tracks_cpu_totals(self) -> None:
+        """Test summary metrics include CPU totals."""
         presenter = ChartsExplorerPresenter()
         charts = [_make_chart(cpu_request=100, cpu_limit=200)]
-        result = presenter.build_summary(charts, charts, ViewFilter.ALL)
-        assert "CPU:" in result
-        assert "100m" in result
+        metrics = presenter.build_summary_metrics(charts, charts)
+        assert metrics["cpu_req"] == 100
+        assert metrics["cpu_lim"] == 200
 
-    def test_shows_memory_totals(self) -> None:
-        """Test summary includes memory totals."""
+    def test_tracks_memory_totals(self) -> None:
+        """Test summary metrics include memory totals."""
         presenter = ChartsExplorerPresenter()
         charts = [_make_chart(memory_request=256 * 1024 * 1024)]
-        result = presenter.build_summary(charts, charts, ViewFilter.ALL)
-        assert "Mem:" in result
+        metrics = presenter.build_summary_metrics(charts, charts)
+        assert metrics["mem_req"] == 256 * 1024 * 1024
 
     def test_empty_filtered_charts(self) -> None:
-        """Test summary with empty filtered list."""
+        """Test summary metrics with empty filtered list."""
         presenter = ChartsExplorerPresenter()
         all_charts = [_make_chart()]
-        result = presenter.build_summary(all_charts, [], ViewFilter.ALL)
-        assert "0/1 charts" in result
+        metrics = presenter.build_summary_metrics(all_charts, [])
+        assert metrics["total"] == 1
+        assert metrics["shown"] == 0
 
 
 # =============================================================================
@@ -719,6 +720,6 @@ __all__ = [
     "TestApplyFilters",
     "TestSorting",
     "TestFormatChartRow",
-    "TestBuildSummary",
+    "TestBuildSummaryMetrics",
     "TestHelperMethods",
 ]

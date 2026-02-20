@@ -96,15 +96,14 @@ class ChartParser:
         has_startup = self._has_probe(values, "startupProbe")
 
         # Also check nested probes structure
-        if not has_liveness:
+        if not has_liveness or not has_readiness or not has_startup:
             probes = values.get("probes", {})
-            has_liveness = bool(probes.get("liveness"))
-        if not has_readiness:
-            probes = values.get("probes", {})
-            has_readiness = bool(probes.get("readiness"))
-        if not has_startup:
-            probes = values.get("probes", {})
-            has_startup = bool(probes.get("startup"))
+            if not has_liveness:
+                has_liveness = bool(probes.get("liveness"))
+            if not has_readiness:
+                has_readiness = bool(probes.get("readiness"))
+            if not has_startup:
+                has_startup = bool(probes.get("startup"))
 
         # Check for anti-affinity
         has_anti_affinity = self._has_anti_affinity(values)

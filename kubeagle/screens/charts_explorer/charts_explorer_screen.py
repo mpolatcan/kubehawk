@@ -49,7 +49,6 @@ from kubeagle.screens.charts_explorer.config import (
     VIEW_FILTER_BY_TAB_ID,
     VIEW_TAB_ID_BY_FILTER,
     VIEW_TAB_OPTIONS,
-    GroupBy,
     SortBy,
     ViewFilter,
 )
@@ -1076,9 +1075,9 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
     _DOUBLE_SELECT_THRESHOLD_SECONDS = 0.5
     _CLUSTER_PARTIAL_UPDATE_STEP = 5
     _CLUSTER_PARTIAL_UPDATE_MIN_INTERVAL_SECONDS = 0.35
-    _OPTIMIZER_PARTIAL_UPDATE_STEP = 4
-    _OPTIMIZER_PARTIAL_UPDATE_MIN_INTERVAL_SECONDS = 0.30
-    _OPTIMIZER_PARTIAL_UI_MIN_INTERVAL_SECONDS = 0.80
+    _OPTIMIZER_PARTIAL_UPDATE_STEP = 2
+    _OPTIMIZER_PARTIAL_UPDATE_MIN_INTERVAL_SECONDS = 0.15
+    _OPTIMIZER_PARTIAL_UI_MIN_INTERVAL_SECONDS = 0.40
     _NAMESPACE_COLUMN_NAME = "Namespace"
     _LOCKED_COLUMN_NAMES = frozenset({"Chart", "Team", "Values File Type"})
     _PROGRESS_TEXT_MAX_ULTRA = 96
@@ -1108,7 +1107,6 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
         self,
         initial_view: ViewFilter | None = None,
         initial_sort: SortBy | None = None,
-        initial_group_by: GroupBy | None = None,
         initial_tab: str = TAB_CHARTS,
         team_filter: str | None = None,
         include_cluster: bool = True,
@@ -1116,7 +1114,7 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
     ) -> None:
         super().__init__()
         self._initial_view = initial_view
-        self._initial_sort = initial_sort or self._map_legacy_group_by(initial_group_by)
+        self._initial_sort = initial_sort
         self._initial_tab = initial_tab
         self._active_tab = initial_tab
         self._testing = testing
@@ -1417,19 +1415,6 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
         if self._cached_helm_recommendations_signature != violations_signature:
             self._cached_helm_recommendations = None
             self._cached_helm_recommendations_signature = None
-
-    @staticmethod
-    def _map_legacy_group_by(group_by: GroupBy | None) -> SortBy | None:
-        """Map legacy initial_group_by values to sort modes for compatibility."""
-        if group_by is None:
-            return None
-        if group_by == GroupBy.BY_TEAM:
-            return SortBy.TEAM
-        if group_by == GroupBy.BY_QOS:
-            return SortBy.QOS
-        if group_by == GroupBy.BY_VALUES_FILE:
-            return SortBy.VALUES_FILE
-        return SortBy.CHART
 
     @property
     def screen_title(self) -> str:
@@ -2509,10 +2494,6 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
             name="charts-explorer-data",
             exclusive=True,
         )
-
-    async def _load_charts_data(self) -> None:
-        """Backward-compatible alias for worker-driven loading."""
-        self._start_load_worker(force_refresh=False)
 
     async def _load_charts_data_worker(self) -> None:
         """Load charts asynchronously and post partial/final data messages."""

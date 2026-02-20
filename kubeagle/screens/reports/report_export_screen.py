@@ -73,14 +73,6 @@ _INVALID_FILENAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 _REPORT_EXPORT_LAYOUT_CLASSES = ("wide", "medium", "narrow")
 _REPORT_EXPORT_HEIGHT_CLASSES = ("normal-height", "short-height")
-_EXPORT_FULL_BUTTON_LABELS = {
-    "btn-export": "Export",
-    "btn-copy": "Copy",
-}
-_EXPORT_COMPACT_BUTTON_LABELS = {
-    "btn-export": "Export",
-    "btn-copy": "Copy",
-}
 
 
 # ============================================================================
@@ -128,7 +120,6 @@ class ReportExportScreen(MainNavigationTabsMixin, ScreenNavigator, WorkerMixin, 
         self._report_data: ReportData | None = None
         self._is_exporting: bool = False
         self._is_copying: bool = False
-        self._is_saving: bool = False
         self._layout_mode: str | None = None
         self._height_mode: str | None = None
         self._resize_debounce_timer: Timer | None = None
@@ -350,16 +341,6 @@ class ReportExportScreen(MainNavigationTabsMixin, ScreenNavigator, WorkerMixin, 
             main_content.add_class(mode)
         except Exception:
             pass
-
-        self._update_action_button_labels(mode, height_mode)
-
-    def _update_action_button_labels(self, layout_mode: str, height_mode: str) -> None:
-        """Use compact action labels on constrained layouts."""
-        compact = layout_mode != "wide" or height_mode == "short-height"
-        labels = _EXPORT_COMPACT_BUTTON_LABELS if compact else _EXPORT_FULL_BUTTON_LABELS
-        for button_id, label in labels.items():
-            with suppress(Exception):
-                self.query_one(f"#{button_id}", CustomButton).label = label
 
     def _start_load_worker(self) -> None:
         """Start the worker for background report data loading."""
@@ -931,10 +912,6 @@ class ReportExportScreen(MainNavigationTabsMixin, ScreenNavigator, WorkerMixin, 
             head = available // 2
             tail = available - head
         return f"{value[:head]}…{value[-tail:]}"
-
-    def on_input_changed(self, event: CustomInput.Changed) -> None:
-        """Backward-compatible input handler to update output path label."""
-        self._handle_filename_input_update(event.input.id)
 
     def on_custom_input_changed(self, event: CustomInput.Changed) -> None:
         """Update output path label live while typing in filename input."""

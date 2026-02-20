@@ -2,19 +2,11 @@
 
 from __future__ import annotations
 
-from kubeagle.constants.enums import GroupBy, SortBy, ViewFilter
+from kubeagle.constants.enums import SortBy, ViewFilter
 
 # =============================================================================
 # Select Widget Options (label, value)
 # =============================================================================
-
-VIEW_OPTIONS: list[tuple[str, ViewFilter]] = [
-    ("All Charts", ViewFilter.ALL),
-    ("Extreme Ratios (>=2.0x)", ViewFilter.EXTREME_RATIOS),
-    ("Single Replica", ViewFilter.SINGLE_REPLICA),
-    ("Missing PDB", ViewFilter.NO_PDB),
-    ("Optimizer", ViewFilter.WITH_VIOLATIONS),
-]
 
 VIEW_TAB_OPTIONS: list[tuple[str, ViewFilter, str]] = [
     ("All Charts", ViewFilter.ALL, "charts-view-tab-all"),
@@ -32,13 +24,6 @@ VIEW_TAB_ID_BY_FILTER: dict[ViewFilter, str] = {
     view_filter: tab_id for _, view_filter, tab_id in VIEW_TAB_OPTIONS
 }
 
-GROUP_BY_OPTIONS: list[tuple[str, GroupBy]] = [
-    ("None", GroupBy.NONE),
-    ("By Team", GroupBy.BY_TEAM),
-    ("By QoS", GroupBy.BY_QOS),
-    ("By Values File", GroupBy.BY_VALUES_FILE),
-]
-
 SORT_OPTIONS: list[tuple[str, SortBy]] = [
     ("Chart", SortBy.CHART),
     ("Team", SortBy.TEAM),
@@ -53,9 +38,6 @@ SORT_OPTIONS: list[tuple[str, SortBy]] = [
     ("Values File", SortBy.VALUES_FILE),
     ("Violations", SortBy.VIOLATIONS),
 ]
-
-# Team sentinel for "All Teams"
-ALL_TEAMS_SENTINEL = "__all_teams__"
 
 # Tab IDs
 TAB_CHARTS = "tab-charts"
@@ -98,13 +80,6 @@ EXPLORER_HEADER_TOOLTIPS: dict[str, str] = {
     "PDB": "PodDisruptionBudget presence/status.",
     "Chart Path": "Filesystem path of the chart.",
 }
-
-
-# =============================================================================
-# Symbol Legend
-# =============================================================================
-
-SYMBOL_LEGEND = "L=Liveness  R=Readiness  S=Startup  |  =Warning"
 
 
 # =============================================================================

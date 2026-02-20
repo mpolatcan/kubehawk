@@ -323,7 +323,6 @@ def navigate_to_charts_explorer(
     app: App,
     initial_view: Any = None,
     initial_sort: Any = None,
-    initial_group_by: Any = None,
     testing: bool = False,
 ) -> None:
     """Navigate to charts explorer screen.
@@ -332,7 +331,6 @@ def navigate_to_charts_explorer(
         app: The Textual app instance.
         initial_view: Optional ViewFilter to set on open.
         initial_sort: Optional SortBy to set on open.
-        initial_group_by: Optional GroupBy to set on open.
         testing: If True, creates screen in testing mode (skips worker).
     """
     from kubeagle.screens.charts_explorer import ChartsExplorerScreen
@@ -341,7 +339,6 @@ def navigate_to_charts_explorer(
         ChartsExplorerScreen(
             initial_view=initial_view,
             initial_sort=initial_sort,
-            initial_group_by=initial_group_by,
             testing=testing,
         )
     )

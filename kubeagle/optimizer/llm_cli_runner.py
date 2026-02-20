@@ -7,15 +7,9 @@ import contextlib
 import os
 import shutil
 import subprocess
-import tempfile
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-
-from kubeagle.optimizer.llm_patch_protocol import (
-    StructuredPatchResponse,
-    parse_structured_patch_response,
-)
 
 _AGENT_SDK_MAX_TURNS = 10
 
@@ -25,30 +19,6 @@ class LLMProvider(str, Enum):
 
     CODEX = "codex"
     CLAUDE = "claude"
-
-
-@dataclass(slots=True)
-class LLMCLIResult:
-    """Result from a non-interactive LLM CLI execution."""
-
-    ok: bool
-    provider: LLMProvider
-    command: list[str] = field(default_factory=list)
-    response_text: str = ""
-    stderr: str = ""
-    error_message: str = ""
-    exit_code: int = 0
-
-
-@dataclass(slots=True)
-class LLMStructuredPatchResult:
-    """Structured patch execution and parsing result."""
-
-    ok: bool
-    provider: LLMProvider
-    cli_result: LLMCLIResult
-    parsed: StructuredPatchResponse | None = None
-    parse_error: str = ""
 
 
 @dataclass(slots=True)
@@ -66,14 +36,38 @@ class LLMDirectEditResult:
     stderr_tail: str = ""
 
 
+# Environment variables that must be cleared before launching a nested Claude
+# Code process through the Agent SDK, otherwise the subprocess refuses to start
+# with "Claude Code cannot be launched inside another Claude Code session."
+_CLAUDE_SESSION_ENV_VARS: tuple[str, ...] = (
+    "CLAUDECODE",
+    "CLAUDE_CODE_SESSION",
+    "CLAUDE_CODE_ENTRY",
+)
+
+
+_CLAUDE_SDK_CHECKED: bool = False
+_CLAUDE_SDK_OK: bool = False
+
+
 def _claude_agent_sdk_available() -> bool:
-    """Return True if the claude-agent-sdk package is importable."""
+    """Return True if the claude-agent-sdk package is importable.
+
+    The result is cached after the first successful probe so that Textual
+    terminal takeover or other runtime environment changes cannot flip
+    a previously-working import to False.
+    """
+    global _CLAUDE_SDK_CHECKED, _CLAUDE_SDK_OK  # noqa: PLW0603
+    if _CLAUDE_SDK_CHECKED:
+        return _CLAUDE_SDK_OK
     try:
         from claude_agent_sdk import query as _q  # noqa: F401
 
-        return True
+        _CLAUDE_SDK_OK = True
     except Exception:
-        return False
+        _CLAUDE_SDK_OK = False
+    _CLAUDE_SDK_CHECKED = True
+    return _CLAUDE_SDK_OK
 
 
 def detect_llm_cli_capabilities() -> dict[LLMProvider, bool]:
@@ -244,6 +238,39 @@ def _run_direct_edit_subprocess(
     )
 
 
+def _patch_sdk_message_parser() -> None:
+    """Patch the Agent SDK message parser to skip unknown message types.
+
+    The Anthropic streaming API may send event types (e.g.
+    ``rate_limit_event``) that the SDK does not recognise.  The SDK's
+    ``parse_message`` raises ``MessageParseError`` on these, which kills
+    the async generator — Python cannot resume iteration after an
+    exception.  This patch replaces the parser so that unrecognised
+    types return ``None`` instead of raising, allowing the stream to
+    continue.
+    """
+    try:
+        from claude_agent_sdk._internal import client as _sdk_client_mod
+        from claude_agent_sdk._internal import message_parser as _mp
+
+        _original_parse = _mp.parse_message
+
+        def _safe_parse_message(data: dict) -> object:
+            try:
+                return _original_parse(data)
+            except Exception:
+                # Unknown / unrecognised message type — skip silently.
+                return None
+
+        # Patch the module-level reference so InternalClient.process_query
+        # picks up the safe version.
+        _sdk_client_mod.parse_message = _safe_parse_message  # type: ignore[assignment]
+    except Exception:
+        # If the internal SDK layout changes, silently ignore and let
+        # the original behaviour remain.
+        pass
+
+
 def _run_claude_agent_sdk_direct_edit(
     *,
     prompt: str,
@@ -252,7 +279,11 @@ def _run_claude_agent_sdk_direct_edit(
     max_turns: int = _AGENT_SDK_MAX_TURNS,
     timeout_seconds: int = 180,
 ) -> LLMDirectEditResult:
-    """Run Claude Agent SDK with Read/Write/Edit tools for direct file edits."""
+    """Run Claude Agent SDK with Read/Write/Edit tools for direct file edits.
+
+    Non-fatal stream events (e.g. ``rate_limit_event``) that the SDK does
+    not recognise are silently ignored so the stream can complete normally.
+    """
     try:
         from claude_agent_sdk import (
             AssistantMessage,
@@ -269,6 +300,9 @@ def _run_claude_agent_sdk_direct_edit(
             error_message="claude-agent-sdk not installed.",
         )
 
+    _EDIT_TOOLS = {"Write", "Edit", "MultiEdit"}
+
+    effective_timeout = max(10, int(timeout_seconds))
     options = ClaudeAgentOptions(
         model=model,
         cwd=str(working_dir),
@@ -284,20 +318,28 @@ def _run_claude_agent_sdk_direct_edit(
     ]
     final_text: list[str] = []
     result_msg: ResultMessage | None = None
+    stream_error: str = ""
+    got_edit_tool_calls: bool = False
 
     async def _run() -> None:
-        nonlocal result_msg
-        async for message in query(prompt=prompt, options=options):
-            if isinstance(message, AssistantMessage):
-                for block in message.content:
-                    if isinstance(block, TextBlock):
-                        final_text.append(block.text)
-                    elif isinstance(block, ToolUseBlock):
-                        log_lines.append(f"  Tool: {block.name}({_summarize_tool_input(block.input)})")
-            elif isinstance(message, ResultMessage):
-                result_msg = message
+        nonlocal result_msg, stream_error, got_edit_tool_calls
+        try:
+            async for message in query(prompt=prompt, options=options):
+                if isinstance(message, AssistantMessage):
+                    for block in message.content:
+                        if isinstance(block, TextBlock):
+                            final_text.append(block.text)
+                        elif isinstance(block, ToolUseBlock):
+                            if block.name in _EDIT_TOOLS:
+                                got_edit_tool_calls = True
+                            log_lines.append(f"  Tool: {block.name}({_summarize_tool_input(block.input)})")
+                elif isinstance(message, ResultMessage):
+                    result_msg = message
+        except Exception as exc:
+            stream_error = str(exc)
+            log_lines.append(f"  Stream interrupted: {stream_error}")
 
-    effective_timeout = max(10, int(timeout_seconds))
+    saved_env = _clear_claude_session_env()
     try:
         asyncio.run(asyncio.wait_for(_run(), timeout=float(effective_timeout)))
     except asyncio.TimeoutError:
@@ -314,6 +356,8 @@ def _run_claude_agent_sdk_direct_edit(
             error_message=str(exc),
             log_text="\n".join(log_lines),
         )
+    finally:
+        _restore_claude_session_env(saved_env)
 
     if result_msg is not None:
         cost = getattr(result_msg, "total_cost_usd", None) or 0
@@ -329,6 +373,26 @@ def _run_claude_agent_sdk_direct_edit(
                 log_text="\n".join(log_lines),
             )
 
+    # If the stream broke but the agent already made edit tool calls,
+    # treat as success so the caller inspects the workspace for changes.
+    if stream_error and got_edit_tool_calls:
+        return LLMDirectEditResult(
+            ok=True,
+            provider=LLMProvider.CLAUDE,
+            command=[f"claude-agent-sdk:{model or 'default'}"],
+            log_text="\n".join(log_lines),
+            stdout_tail=_tail_text("\n".join(final_text)),
+        )
+
+    if stream_error:
+        return LLMDirectEditResult(
+            ok=False,
+            provider=LLMProvider.CLAUDE,
+            error_message=stream_error,
+            log_text="\n".join(log_lines),
+        )
+
+    # Clean completion.
     return LLMDirectEditResult(
         ok=True,
         provider=LLMProvider.CLAUDE,
@@ -354,268 +418,20 @@ def _summarize_tool_input(tool_input: dict | str | None) -> str:
     return str(tool_input)[:80]
 
 
-def run_llm_cli_non_interactive(
-    *,
-    provider: LLMProvider,
-    prompt: str,
-    timeout_seconds: int = 120,
-    cwd: Path | None = None,
-    model: str | None = None,
-) -> LLMCLIResult:
-    """Run provider CLI in non-interactive mode and return direct response text."""
-    working_dir = cwd.expanduser().resolve() if cwd is not None else None
-    if provider == LLMProvider.CODEX:
-        return _run_codex_non_interactive(
-            prompt=prompt,
-            timeout_seconds=timeout_seconds,
-            cwd=working_dir,
-            model=model,
-        )
-    if provider == LLMProvider.CLAUDE:
-        return _run_claude_agent_sdk_non_interactive(
-            prompt=prompt,
-            timeout_seconds=timeout_seconds,
-            cwd=working_dir,
-            model=model,
-        )
-    return LLMCLIResult(
-        ok=False,
-        provider=provider,
-        error_message=f"Unsupported provider: {provider}",
-        exit_code=2,
-    )
+def _clear_claude_session_env() -> dict[str, str]:
+    """Remove Claude Code session env vars; return saved values for restore."""
+    saved: dict[str, str] = {}
+    for key in _CLAUDE_SESSION_ENV_VARS:
+        value = os.environ.pop(key, None)
+        if value is not None:
+            saved[key] = value
+    return saved
 
 
-def _run_codex_non_interactive(
-    *,
-    prompt: str,
-    timeout_seconds: int,
-    cwd: Path | None,
-    model: str | None,
-) -> LLMCLIResult:
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        prefix="kubeagle-codex-last-message-",
-        suffix=".txt",
-        delete=False,
-    ) as tmp_output:
-        output_path = Path(tmp_output.name)
-
-    command = [
-        "codex",
-        "exec",
-        "--ephemeral",
-        "--color",
-        "never",
-        "--skip-git-repo-check",
-        "--output-last-message",
-        str(output_path),
-    ]
-    if model:
-        command.extend(["--model", model])
-    if cwd is not None:
-        command.extend(["--cd", str(cwd)])
-    command.append("-")
-
-    try:
-        process = subprocess.run(
-            command,
-            input=prompt,
-            capture_output=True,
-            text=True,
-            timeout=max(1, int(timeout_seconds)),
-            check=False,
-            cwd=str(cwd) if cwd is not None else None,
-            env=_non_interactive_env(),
-        )
-    except FileNotFoundError as exc:
-        output_path.unlink(missing_ok=True)
-        return LLMCLIResult(
-            ok=False,
-            provider=LLMProvider.CODEX,
-            command=command,
-            error_message=str(exc),
-            exit_code=127,
-        )
-    except subprocess.TimeoutExpired as exc:
-        output_path.unlink(missing_ok=True)
-        return LLMCLIResult(
-            ok=False,
-            provider=LLMProvider.CODEX,
-            command=command,
-            stderr=_safe_text(exc.stderr),
-            error_message=f"codex command timed out after {timeout_seconds}s",
-            exit_code=124,
-        )
-
-    response_text = ""
-    with_output = output_path
-    if with_output.exists():
-        with_output_text = with_output.read_text(encoding="utf-8").strip()
-        response_text = with_output_text
-    with_output.unlink(missing_ok=True)
-    if not response_text:
-        response_text = (process.stdout or "").strip()
-
-    if process.returncode != 0:
-        return LLMCLIResult(
-            ok=False,
-            provider=LLMProvider.CODEX,
-            command=command,
-            response_text=response_text,
-            stderr=(process.stderr or "").strip(),
-            error_message=((process.stderr or process.stdout) or "").strip()
-            or f"codex exited with code {process.returncode}",
-            exit_code=process.returncode,
-        )
-
-    return LLMCLIResult(
-        ok=True,
-        provider=LLMProvider.CODEX,
-        command=command,
-        response_text=response_text,
-        stderr=(process.stderr or "").strip(),
-        exit_code=process.returncode,
-    )
-
-
-def _run_claude_agent_sdk_non_interactive(
-    *,
-    prompt: str,
-    timeout_seconds: int,
-    cwd: Path | None,
-    model: str | None,
-) -> LLMCLIResult:
-    """Run Claude via Agent SDK for non-interactive text generation."""
-    try:
-        from claude_agent_sdk import (
-            AssistantMessage,
-            ClaudeAgentOptions,
-            ResultMessage,
-            TextBlock,
-            query,
-        )
-    except ImportError:
-        return LLMCLIResult(
-            ok=False,
-            provider=LLMProvider.CLAUDE,
-            command=[f"claude-agent-sdk:{model or 'default'}"],
-            error_message="claude-agent-sdk not installed.",
-            exit_code=127,
-        )
-
-    command = [f"claude-agent-sdk:{model or 'default'}"]
-    resolved_cwd = cwd or Path.cwd()
-    options = ClaudeAgentOptions(
-        model=model,
-        cwd=str(resolved_cwd),
-        allowed_tools=[],
-        permission_mode="bypassPermissions",
-        max_turns=max(1, _AGENT_SDK_MAX_TURNS),
-    )
-
-    final_text: list[str] = []
-    result_msg: ResultMessage | None = None
-
-    async def _run() -> None:
-        nonlocal result_msg
-        async for message in query(prompt=prompt, options=options):
-            if isinstance(message, AssistantMessage):
-                for block in message.content:
-                    if isinstance(block, TextBlock):
-                        final_text.append(block.text)
-            elif isinstance(message, ResultMessage):
-                result_msg = message
-
-    effective_timeout = max(10, int(timeout_seconds))
-    try:
-        asyncio.run(asyncio.wait_for(_run(), timeout=float(effective_timeout)))
-    except asyncio.TimeoutError:
-        return LLMCLIResult(
-            ok=False,
-            provider=LLMProvider.CLAUDE,
-            command=command,
-            error_message=f"Claude Agent SDK timed out after {effective_timeout}s",
-            exit_code=124,
-        )
-    except Exception as exc:
-        return LLMCLIResult(
-            ok=False,
-            provider=LLMProvider.CLAUDE,
-            command=command,
-            error_message=str(exc),
-            exit_code=1,
-        )
-
-    if result_msg is not None and bool(getattr(result_msg, "is_error", False)):
-        error_text = str(getattr(result_msg, "result", "") or "Agent SDK error").strip()
-        return LLMCLIResult(
-            ok=False,
-            provider=LLMProvider.CLAUDE,
-            command=command,
-            response_text="",
-            stderr="",
-            error_message=error_text,
-            exit_code=1,
-        )
-
-    response_text = "\n".join(final_text).strip()
-    if not response_text and result_msg is not None:
-        raw_result = getattr(result_msg, "result", "")
-        if isinstance(raw_result, str):
-            response_text = raw_result.strip()
-
-    return LLMCLIResult(
-        ok=True,
-        provider=LLMProvider.CLAUDE,
-        command=command,
-        response_text=response_text,
-        stderr="",
-        exit_code=0,
-    )
-
-
-def run_llm_structured_patch_non_interactive(
-    *,
-    provider: LLMProvider,
-    prompt: str,
-    timeout_seconds: int = 120,
-    cwd: Path | None = None,
-    model: str | None = None,
-) -> LLMStructuredPatchResult:
-    """Run LLM CLI non-interactively and parse structured patch response."""
-    cli_result = run_llm_cli_non_interactive(
-        provider=provider,
-        prompt=prompt,
-        timeout_seconds=timeout_seconds,
-        cwd=cwd,
-        model=model,
-    )
-    if not cli_result.ok:
-        return LLMStructuredPatchResult(
-            ok=False,
-            provider=provider,
-            cli_result=cli_result,
-            parse_error="CLI execution failed",
-        )
-
-    try:
-        parsed = parse_structured_patch_response(cli_result.response_text)
-    except ValueError as exc:
-        return LLMStructuredPatchResult(
-            ok=False,
-            provider=provider,
-            cli_result=cli_result,
-            parse_error=str(exc),
-        )
-
-    return LLMStructuredPatchResult(
-        ok=True,
-        provider=provider,
-        cli_result=cli_result,
-        parsed=parsed,
-    )
+def _restore_claude_session_env(saved: dict[str, str]) -> None:
+    """Restore previously cleared Claude Code session env vars."""
+    for key, value in saved.items():
+        os.environ[key] = value
 
 
 def _non_interactive_env() -> dict[str, str]:
@@ -623,6 +439,8 @@ def _non_interactive_env() -> dict[str, str]:
     env["CI"] = "1"
     env["TERM"] = "dumb"
     env["NO_COLOR"] = "1"
+    for key in _CLAUDE_SESSION_ENV_VARS:
+        env.pop(key, None)
     return env
 
 
@@ -712,4 +530,13 @@ def _build_direct_edit_log(
     if stderr_tail:
         lines.extend(["", "STDERR (tail):", stderr_tail])
     return "\n".join(lines).strip()
+
+
+# Warm the SDK availability cache at import time, before Textual takes over
+# the terminal and potentially interferes with lazy imports.
+_claude_agent_sdk_available()
+
+# Patch the SDK message parser to tolerate unknown streaming event types
+# (e.g. rate_limit_event) that would otherwise kill the async generator.
+_patch_sdk_message_parser()
 

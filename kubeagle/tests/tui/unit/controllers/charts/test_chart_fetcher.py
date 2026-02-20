@@ -89,35 +89,6 @@ class TestChartFetcher:
         result = fetcher.find_chart_directories()
         assert result == [parent_chart]
 
-    def test_find_values_file_priority(self, fetcher: ChartFetcher, tmp_path: Path) -> None:
-        """Test find_values_file returns correct priority file."""
-        chart_path = tmp_path / "my-chart"
-        chart_path.mkdir()
-
-        # Create files in wrong order
-        (chart_path / "values.yaml").write_text("key: default")
-        (chart_path / "values-automation.yaml").write_text("key: automation")
-
-        result = fetcher.find_values_file(chart_path)
-        assert result == chart_path / "values-automation.yaml"
-
-    def test_find_values_file_fallback(self, fetcher: ChartFetcher, tmp_path: Path) -> None:
-        """Test find_values_file falls back to values.yaml."""
-        chart_path = tmp_path / "my-chart"
-        chart_path.mkdir()
-        (chart_path / "values.yaml").write_text("key: value")
-
-        result = fetcher.find_values_file(chart_path)
-        assert result == chart_path / "values.yaml"
-
-    def test_find_values_file_not_found(self, fetcher: ChartFetcher, tmp_path: Path) -> None:
-        """Test find_values_file returns None when no values file exists."""
-        chart_path = tmp_path / "my-chart"
-        chart_path.mkdir()
-
-        result = fetcher.find_values_file(chart_path)
-        assert result is None
-
     def test_find_values_files_includes_all_values_variants(
         self, fetcher: ChartFetcher, tmp_path: Path
     ) -> None:
@@ -160,35 +131,3 @@ class TestChartFetcher:
         """Test parse_values_file returns None for non-existent file."""
         result = fetcher.parse_values_file(Path("/nonexistent/values.yaml"))
         assert result is None
-
-    def test_fetch_all_charts_parallel(self, fetcher: ChartFetcher, tmp_path: Path) -> None:
-        """Test fetch_all_charts_parallel processes charts in parallel."""
-        chart1 = tmp_path / "chart1"
-        chart1.mkdir()
-        (chart1 / "values.yaml").write_text("name: chart1")
-
-        chart2 = tmp_path / "chart2"
-        chart2.mkdir()
-        (chart2 / "values.yaml").write_text("name: chart2")
-
-        def analyze_func(chart_path: Path) -> dict:
-            return {"path": str(chart_path), "name": chart_path.name}
-
-        result = fetcher.fetch_all_charts_parallel([chart1, chart2], analyze_func)
-        assert len(result) == 2
-        assert result[0]["path"] in [str(chart1), str(chart2)]
-        assert result[1]["path"] in [str(chart1), str(chart2)]
-
-    def test_fetch_all_charts_parallel_filters_none(self, fetcher: ChartFetcher, tmp_path: Path) -> None:
-        """Test fetch_all_charts_parallel filters out None results."""
-        chart1 = tmp_path / "chart1"
-        chart1.mkdir()
-        (chart1 / "values.yaml").write_text("name: chart1")
-
-        def analyze_func(chart_path: Path) -> dict | None:
-            if chart_path.name == "chart1":
-                return None
-            return {"path": str(chart_path)}
-
-        result = fetcher.fetch_all_charts_parallel([chart1], analyze_func)
-        assert result == []

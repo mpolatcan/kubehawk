@@ -2,11 +2,8 @@
 
 This module tests:
 - ViewFilter enum values and completeness
-- GroupBy enum values and completeness
-- VIEW_OPTIONS and GROUP_BY_OPTIONS (count, types, labels)
 - EXPLORER_TABLE_COLUMNS (count, types, widths)
-- SYMBOL_LEGEND and EXTREME_RATIO_THRESHOLD constants
-- ALL_TEAMS_SENTINEL value
+- EXTREME_RATIO_THRESHOLD constant
 
 All constants are imported from screens.charts_explorer.config.
 """
@@ -14,18 +11,12 @@ All constants are imported from screens.charts_explorer.config.
 from __future__ import annotations
 
 from kubeagle.screens.charts_explorer.config import (
-    ALL_TEAMS_SENTINEL,
     EXPLORER_HEADER_TOOLTIPS,
     EXPLORER_TABLE_COLUMNS,
     EXTREME_RATIO_THRESHOLD,
-    GROUP_BY_OPTIONS,
-    SYMBOL_LEGEND,
-    VIEW_OPTIONS,
     VIEW_TAB_OPTIONS,
-    GroupBy,
     ViewFilter,
 )
-
 # =============================================================================
 # ViewFilter Enum Tests
 # =============================================================================
@@ -65,70 +56,8 @@ class TestViewFilterEnum:
 
 
 # =============================================================================
-# GroupBy Enum Tests
+# VIEW_TAB_OPTIONS Tests
 # =============================================================================
-
-
-class TestGroupByEnum:
-    """Test GroupBy enum values."""
-
-    def test_none_value(self) -> None:
-        """Test GroupBy.NONE has correct value."""
-        assert GroupBy.NONE.value == "none"
-
-    def test_by_team_value(self) -> None:
-        """Test GroupBy.BY_TEAM has correct value."""
-        assert GroupBy.BY_TEAM.value == "by_team"
-
-    def test_by_qos_value(self) -> None:
-        """Test GroupBy.BY_QOS has correct value."""
-        assert GroupBy.BY_QOS.value == "by_qos"
-
-    def test_by_values_file_value(self) -> None:
-        """Test GroupBy.BY_VALUES_FILE has correct value."""
-        assert GroupBy.BY_VALUES_FILE.value == "by_values_file"
-
-    def test_enum_has_4_members(self) -> None:
-        """Test GroupBy has exactly 4 members."""
-        assert len(GroupBy) == 4
-
-    def test_all_values_unique(self) -> None:
-        """Test all GroupBy values are unique."""
-        values = [v.value for v in GroupBy]
-        assert len(values) == len(set(values))
-
-
-# =============================================================================
-# VIEW_OPTIONS Tests
-# =============================================================================
-
-
-class TestViewOptions:
-    """Test VIEW_OPTIONS list."""
-
-    def test_has_5_options(self) -> None:
-        """Test VIEW_OPTIONS has exactly 5 entries."""
-        assert len(VIEW_OPTIONS) == 5
-
-    def test_all_tuples(self) -> None:
-        """Test each option is a (str, ViewFilter) tuple."""
-        for label, value in VIEW_OPTIONS:
-            assert isinstance(label, str), f"Label must be str, got {type(label)}"
-            assert isinstance(value, ViewFilter), f"Value must be ViewFilter, got {type(value)}"
-
-    def test_labels_non_empty(self) -> None:
-        """Test all option labels are non-empty strings."""
-        for label, _ in VIEW_OPTIONS:
-            assert len(label) > 0
-
-    def test_first_option_is_all(self) -> None:
-        """Test first option is All Charts."""
-        assert VIEW_OPTIONS[0][1] == ViewFilter.ALL
-
-    def test_covers_all_enum_values(self) -> None:
-        """Test VIEW_OPTIONS covers all ViewFilter enum members."""
-        option_values = {v for _, v in VIEW_OPTIONS}
-        assert option_values == set(ViewFilter)
 
 
 class TestViewTabOptions:
@@ -144,39 +73,6 @@ class TestViewTabOptions:
             label for label, value, _ in VIEW_TAB_OPTIONS if value == ViewFilter.WITH_VIOLATIONS
         )
         assert optimizer_label == "Optimizer"
-
-
-# =============================================================================
-# GROUP_BY_OPTIONS Tests
-# =============================================================================
-
-
-class TestGroupByOptions:
-    """Test GROUP_BY_OPTIONS list."""
-
-    def test_has_4_options(self) -> None:
-        """Test GROUP_BY_OPTIONS has exactly 4 entries."""
-        assert len(GROUP_BY_OPTIONS) == 4
-
-    def test_all_tuples(self) -> None:
-        """Test each option is a (str, GroupBy) tuple."""
-        for label, value in GROUP_BY_OPTIONS:
-            assert isinstance(label, str), f"Label must be str, got {type(label)}"
-            assert isinstance(value, GroupBy), f"Value must be GroupBy, got {type(value)}"
-
-    def test_labels_non_empty(self) -> None:
-        """Test all option labels are non-empty strings."""
-        for label, _ in GROUP_BY_OPTIONS:
-            assert len(label) > 0
-
-    def test_first_option_is_none(self) -> None:
-        """Test first option is None (no grouping)."""
-        assert GROUP_BY_OPTIONS[0][1] == GroupBy.NONE
-
-    def test_covers_all_enum_values(self) -> None:
-        """Test GROUP_BY_OPTIONS covers all GroupBy enum members."""
-        option_values = {v for _, v in GROUP_BY_OPTIONS}
-        assert option_values == set(GroupBy)
 
 
 # =============================================================================
@@ -243,17 +139,6 @@ class TestExplorerTableColumns:
 class TestChartsExplorerConstants:
     """Test Charts Explorer constants."""
 
-    def test_symbol_legend_is_string(self) -> None:
-        """Test SYMBOL_LEGEND is a non-empty string."""
-        assert isinstance(SYMBOL_LEGEND, str)
-        assert len(SYMBOL_LEGEND) > 0
-
-    def test_symbol_legend_contains_probe_keys(self) -> None:
-        """Test SYMBOL_LEGEND contains probe abbreviations."""
-        assert "L=" in SYMBOL_LEGEND
-        assert "R=" in SYMBOL_LEGEND
-        assert "S=" in SYMBOL_LEGEND
-
     def test_extreme_ratio_threshold_is_float(self) -> None:
         """Test EXTREME_RATIO_THRESHOLD is a float."""
         assert isinstance(EXTREME_RATIO_THRESHOLD, float)
@@ -261,15 +146,6 @@ class TestChartsExplorerConstants:
     def test_extreme_ratio_threshold_value(self) -> None:
         """Test EXTREME_RATIO_THRESHOLD equals 2.0."""
         assert EXTREME_RATIO_THRESHOLD == 2.0
-
-    def test_all_teams_sentinel_is_string(self) -> None:
-        """Test ALL_TEAMS_SENTINEL is a non-empty string."""
-        assert isinstance(ALL_TEAMS_SENTINEL, str)
-        assert len(ALL_TEAMS_SENTINEL) > 0
-
-    def test_all_teams_sentinel_value(self) -> None:
-        """Test ALL_TEAMS_SENTINEL has correct value."""
-        assert ALL_TEAMS_SENTINEL == "__all_teams__"
 
     def test_explorer_header_tooltips_keys_match_columns(self) -> None:
         """Explorer header tooltips should exist for every table column."""
@@ -291,9 +167,7 @@ class TestChartsExplorerConstants:
 
 __all__ = [
     "TestViewFilterEnum",
-    "TestGroupByEnum",
-    "TestViewOptions",
-    "TestGroupByOptions",
+    "TestViewTabOptions",
     "TestExplorerTableColumns",
     "TestChartsExplorerConstants",
 ]

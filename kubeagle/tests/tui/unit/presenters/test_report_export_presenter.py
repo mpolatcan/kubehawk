@@ -141,11 +141,6 @@ class TestReportExportScreenExportStatus:
         screen = ReportExportScreen()
         assert screen._is_copying is False
 
-    def test_default_is_saving(self) -> None:
-        """Test that _is_saving is False initially."""
-        screen = ReportExportScreen()
-        assert screen._is_saving is False
-
 
 # =============================================================================
 # ReportExportScreen Message Tests
@@ -297,12 +292,6 @@ class TestReportExportScreenEventHandlers:
         screen = ReportExportScreen()
         assert hasattr(screen, 'on_button_pressed')
         assert callable(screen.on_button_pressed)
-
-    def test_has_on_input_changed(self) -> None:
-        """Test that on_input_changed handler exists."""
-        screen = ReportExportScreen()
-        assert hasattr(screen, 'on_input_changed')
-        assert callable(screen.on_input_changed)
 
     def test_has_on_radio_set_changed(self) -> None:
         """Test that on_radio_set_changed handler exists."""

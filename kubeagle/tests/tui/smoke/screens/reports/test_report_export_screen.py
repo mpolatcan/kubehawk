@@ -248,11 +248,11 @@ class TestReportExportScreenExportActions:
 class TestReportExportScreenInputHandlers:
     """Test ReportExportScreen input change handlers."""
 
-    def test_has_input_changed_handler(self) -> None:
-        """Test that on_input_changed handler exists."""
+    def test_has_custom_input_changed_handler(self) -> None:
+        """Test that on_custom_input_changed handler exists."""
         screen = ReportExportScreen()
-        assert hasattr(screen, 'on_input_changed')
-        assert callable(screen.on_input_changed)
+        assert hasattr(screen, 'on_custom_input_changed')
+        assert callable(screen.on_custom_input_changed)
 
 
 # =============================================================================

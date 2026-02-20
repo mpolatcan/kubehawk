@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -74,20 +73,6 @@ class ChartFetcher:
             return False
         return "charts" not in rel_parts
 
-    def find_values_file(self, chart_path: Path) -> Path | None:
-        """Find the values file for a chart (in priority order).
-
-        Args:
-            chart_path: Path to chart directory
-
-        Returns:
-            Path to values file or None if not found.
-        """
-        values_files = self.find_values_files(chart_path)
-        if not values_files:
-            return None
-        return values_files[0]
-
     def find_values_files(self, chart_path: Path) -> list[Path]:
         """Find all values files for a chart in deterministic priority order."""
         if not chart_path.is_dir():
@@ -131,19 +116,3 @@ class ChartFetcher:
             logger.exception(f"Error parsing values file: {values_file}")
             return None
 
-    def fetch_all_charts_parallel(
-        self, chart_dirs: list[Path], analyze_func: Any
-    ) -> list[Any]:
-        """Analyze all charts in parallel.
-
-        Args:
-            chart_dirs: List of chart directories
-            analyze_func: Function to analyze each chart
-
-        Returns:
-            List of analyzed chart results.
-        """
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            results = list(executor.map(analyze_func, chart_dirs))
-
-        return [r for r in results if r is not None]

@@ -650,7 +650,7 @@ class TestChartsExplorerScreenWorkerFromCharts:
             ChartsExplorerScreen,
         )
 
-        assert hasattr(ChartsExplorerScreen, "_load_charts_data")
+        assert hasattr(ChartsExplorerScreen, "_load_charts_data_worker")
         assert hasattr(ChartsExplorerScreen, "show_loading_overlay")
         assert hasattr(ChartsExplorerScreen, "hide_loading_overlay")
 

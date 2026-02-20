@@ -37,7 +37,6 @@ from kubeagle.optimizer.rules import (
     _parse_memory,
     configure_rule_thresholds,
     get_rule_by_id,
-    get_rules_by_category,
 )
 
 
@@ -170,15 +169,6 @@ class TestRulesLookup:
         for rule in RULES:
             assert callable(rule.check), f"Rule {rule.id} has non-callable check"
 
-    def test_get_rules_by_category(self) -> None:
-        """get_rules_by_category should return a dict keyed by category."""
-        by_cat = get_rules_by_category()
-        assert isinstance(by_cat, dict)
-        assert "resources" in by_cat
-        assert "probes" in by_cat
-        assert "availability" in by_cat
-        assert "security" in by_cat
-
     def test_get_rule_by_id_existing(self) -> None:
         """get_rule_by_id should return the rule for a known ID."""
         rule = get_rule_by_id("RES002")
@@ -206,23 +196,23 @@ class TestRulesLookup:
 
     def test_resource_rules_count(self) -> None:
         """Should have 8 resource rules."""
-        by_cat = get_rules_by_category()
-        assert len(by_cat["resources"]) == 8
+        count = sum(1 for r in RULES if r.category == "resources")
+        assert count == 8
 
     def test_probe_rules_count(self) -> None:
         """Should have 3 probe rules."""
-        by_cat = get_rules_by_category()
-        assert len(by_cat["probes"]) == 3
+        count = sum(1 for r in RULES if r.category == "probes")
+        assert count == 3
 
     def test_availability_rules_count(self) -> None:
         """Should have 5 availability rules."""
-        by_cat = get_rules_by_category()
-        assert len(by_cat["availability"]) == 5
+        count = sum(1 for r in RULES if r.category == "availability")
+        assert count == 5
 
     def test_security_rules_count(self) -> None:
         """Should have 1 security rule."""
-        by_cat = get_rules_by_category()
-        assert len(by_cat["security"]) == 1
+        count = sum(1 for r in RULES if r.category == "security")
+        assert count == 1
 
 
 # ===========================================================================

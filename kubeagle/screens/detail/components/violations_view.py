@@ -79,6 +79,9 @@ from kubeagle.screens.detail.components.fix_details_modal import (
 from kubeagle.screens.detail.components.recommendations_view import (
     RecommendationsView,
 )
+from kubeagle.screens.detail.components.resource_impact_view import (
+    ResourceImpactView,
+)
 from kubeagle.screens.detail.config import (
     OPTIMIZER_HEADER_TOOLTIPS,
     OPTIMIZER_TABLE_COLUMNS,
@@ -87,6 +90,9 @@ from kubeagle.screens.detail.config import (
     SORT_SELECT_OPTIONS,
     SORT_SEVERITY,
     SORT_TEAM,
+    VIEW_IMPACT,
+    VIEW_OPTIONS,
+    VIEW_VIOLATIONS,
 )
 from kubeagle.widgets import (
     CustomButton,
@@ -3648,6 +3654,28 @@ class ViolationsView(CustomVertical):
                     id="sort-group",
                     classes="optimizer-filter-group",
                 ),
+                CustomContainer(
+                    CustomStatic("View", classes="optimizer-filter-group-title"),
+                    CustomHorizontal(
+                        CustomVertical(
+                            Select(
+                                [
+                                    (_prefixed_option("View", label), value)
+                                    for label, value in VIEW_OPTIONS
+                                ],
+                                value=VIEW_VIOLATIONS,
+                                allow_blank=False,
+                                id="view-select",
+                                classes="filter-select cluster-tab-control-select",
+                            ),
+                            id="view-control",
+                            classes="filter-control",
+                        ),
+                        classes="optimizer-filter-group-body",
+                    ),
+                    id="view-group",
+                    classes="optimizer-filter-group",
+                ),
                 id="filter-row",
             ),
             id="filter-bar",
@@ -3711,6 +3739,9 @@ class ViolationsView(CustomVertical):
                 id="recommendations-view",
                 embedded=True,
             ),
+            ResourceImpactView(
+                id="impact-analysis-view",
+            ),
             id="optimizer-combined-content",
         )
 
@@ -3726,6 +3757,9 @@ class ViolationsView(CustomVertical):
             pass
         self._set_loading_overlay(True, "Loading violations...")
         self.set_recommendations_loading(True)
+        # Hide impact analysis view initially
+        with contextlib.suppress(Exception):
+            self.query_one("#impact-analysis-view", ResourceImpactView).display = False
         # First-pass UX: fix preview is shown via modal instead of inline side panel.
         with contextlib.suppress(Exception):
             self.query_one("#preview-panel", CustomVertical).display = False
@@ -3826,6 +3860,7 @@ class ViolationsView(CustomVertical):
 
         self._update_filter_status()
         self._sync_recommendations_filters()
+        self._compute_resource_impact()
         self._schedule_resize_update()
 
     def update_partial_data(
@@ -3987,6 +4022,61 @@ class ViolationsView(CustomVertical):
             )
 
     # ------------------------------------------------------------------
+    # Impact Analysis
+    # ------------------------------------------------------------------
+
+    def _compute_resource_impact(self) -> None:
+        """Compute and display resource impact analysis."""
+        with contextlib.suppress(Exception):
+            from kubeagle.optimizer.resource_impact_calculator import (
+                ResourceImpactCalculator,
+            )
+
+            calculator = ResourceImpactCalculator()
+            controller = self._get_optimizer_controller()
+
+            # Fetch cluster nodes from app state when available
+            cluster_nodes = None
+            with contextlib.suppress(Exception):
+                state = getattr(self.app, "state", None)
+                if state is not None:
+                    nodes = getattr(state, "nodes", None)
+                    if nodes:
+                        cluster_nodes = nodes
+
+            result = calculator.compute_impact(
+                self.charts,
+                self.violations,
+                optimizer_controller=controller,
+                cluster_nodes=cluster_nodes,
+            )
+            impact_view = self.query_one("#impact-analysis-view", ResourceImpactView)
+            impact_view.set_data(result)
+
+    def show_impact_view(self) -> None:
+        """Show the impact analysis view and hide others."""
+        with contextlib.suppress(Exception):
+            self.query_one("#violations-left-pane", CustomVertical).display = False
+        with contextlib.suppress(Exception):
+            self.query_one("#recommendations-view", RecommendationsView).display = False
+        with contextlib.suppress(Exception):
+            self.query_one("#impact-analysis-view", ResourceImpactView).display = True
+
+    def hide_impact_view(self) -> None:
+        """Hide the impact analysis view."""
+        with contextlib.suppress(Exception):
+            self.query_one("#impact-analysis-view", ResourceImpactView).display = False
+
+    def show_violations_view(self) -> None:
+        """Show the violations view and hide others."""
+        with contextlib.suppress(Exception):
+            self.query_one("#violations-left-pane", CustomVertical).display = True
+        with contextlib.suppress(Exception):
+            self.query_one("#recommendations-view", RecommendationsView).display = True
+        with contextlib.suppress(Exception):
+            self.query_one("#impact-analysis-view", ResourceImpactView).display = False
+
+    # ------------------------------------------------------------------
     # Filtering
     # ------------------------------------------------------------------
 
@@ -4090,6 +4180,16 @@ class ViolationsView(CustomVertical):
             return
         self.sort_reverse = str(event.value) == "desc"
         self.populate_violations_table()
+
+    @on(Select.Changed, "#view-select")
+    def _on_view_changed(self, event: Select.Changed) -> None:
+        if event.value is Select.BLANK:
+            return
+        view_id = str(event.value)
+        if view_id == VIEW_VIOLATIONS:
+            self.show_violations_view()
+        elif view_id == VIEW_IMPACT:
+            self.show_impact_view()
 
     # ------------------------------------------------------------------
     # Table population

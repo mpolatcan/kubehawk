@@ -839,16 +839,6 @@ RULES: list[OptimizationRule] = [
 ]
 
 
-def get_rules_by_category() -> dict[str, list[OptimizationRule]]:
-    """Get rules organized by category."""
-    result: dict[str, list[OptimizationRule]] = {}
-    for rule in RULES:
-        if rule.category not in result:
-            result[rule.category] = []
-        result[rule.category].append(rule)
-    return result
-
-
 # Pre-built lookup dict for O(1) access
 RULES_BY_ID: dict[str, OptimizationRule] = {rule.id: rule for rule in RULES}
 

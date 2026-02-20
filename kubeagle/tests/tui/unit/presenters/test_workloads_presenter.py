@@ -118,7 +118,12 @@ def test_build_resource_summary_counts_missing_and_extreme() -> None:
         ),
     ]
 
-    summary = presenter.build_resource_summary(workload_kind="Deployment")
+    filtered = presenter.get_filtered_workloads(workload_kind="Deployment")
+    scoped_total = presenter.get_scoped_workload_count(workload_kind="Deployment")
+    summary = presenter.build_resource_summary_from_filtered(
+        filtered_workloads=filtered,
+        scoped_total=scoped_total,
+    )
 
     assert summary["shown_total"] == "2/2"
     assert summary["missing_cpu_request"] == "1"

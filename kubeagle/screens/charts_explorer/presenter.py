@@ -270,41 +270,6 @@ class ChartsExplorerPresenter:
             "mem_lim_fmt": self._format_memory(total_mem_lim) if total_mem_lim > 0 else "-",
         }
 
-    def build_summary(
-        self,
-        all_charts: list[ChartInfo],
-        filtered_charts: list[ChartInfo],
-        view: ViewFilter,
-    ) -> str:
-        """Build summary bar text.
-
-        Args:
-            all_charts: All charts (unfiltered).
-            filtered_charts: Currently displayed charts.
-            view: Current view filter.
-
-        Returns:
-            Rich markup summary string.
-        """
-        _ = view
-        metrics = self.build_summary_metrics(all_charts, filtered_charts)
-
-        parts = [f"{metrics['shown']}/{metrics['total']} charts"]
-
-        if int(metrics["violations"]) > 0:
-            parts.append(f"[#ff9f0a]{metrics['violations']}[/#ff9f0a] violations")
-
-        cpu_req = float(metrics["cpu_req"])
-        cpu_lim = float(metrics["cpu_lim"])
-        if cpu_req > 0:
-            parts.append(f"CPU: {cpu_req:.0f}m/{cpu_lim:.0f}m")
-
-        mem_req = float(metrics["mem_req"])
-        if mem_req > 0:
-            parts.append(f"Mem: {metrics['mem_req_fmt']}/{metrics['mem_lim_fmt']}")
-
-        return " | ".join(parts)
-
     @staticmethod
     def format_count_with_percentage(count: int, total: int) -> str:
         """Format count with percentage in parenthesis."""

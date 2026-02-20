@@ -22,7 +22,6 @@ from kubeagle.optimizer.rules import (
     _check_running_as_root,
     _check_very_low_memory_request,
     get_rule_by_id,
-    get_rules_by_category,
 )
 
 
@@ -557,13 +556,11 @@ class TestRulesCollection:
         for rule_id in expected_rules:
             assert rule_id in rule_ids, f"Rule {rule_id} not found in RULES"
 
-    def test_rules_by_category(self):
-        """Test get_rules_by_category returns all categories."""
-        categories = get_rules_by_category()
-
-        expected_categories = ["resources", "probes", "availability", "security"]
-        for category in expected_categories:
-            assert category in categories, f"Category {category} not found"
+    def test_all_categories_present(self):
+        """Test all expected categories are present in RULES."""
+        categories = {r.category for r in RULES}
+        expected = {"resources", "probes", "availability", "security"}
+        assert expected == categories
 
     def test_get_rule_by_id(self):
         """Test get_rule_by_id returns correct rule."""
