@@ -37,6 +37,7 @@ class ChartsController(BaseController):
     """Helm chart analysis operations with parallel file parsing."""
     _GLOBAL_CACHE_TTL_SECONDS = 45.0
     _GLOBAL_CACHE_MAX_ENTRIES = 10  # Prevent unbounded memory growth
+    _LIVE_VALUES_CACHE_MAX_ENTRIES = 128  # Prevent unbounded memory growth
     _CLUSTER_ANALYSIS_CONCURRENCY_CAP = 16
     _CLUSTER_ANALYSIS_CONCURRENCY_MULTIPLIER = 2
     _global_charts_cache: dict[
@@ -264,22 +265,23 @@ class ChartsController(BaseController):
                 if self._charts_cache is not None:
                     return self._charts_cache
 
-            # If another analysis is already running, wait for it
-            if self._analysis_in_progress is not None:
+            # If another analysis is already running, wait for it.
+            # Re-check inside the lock after waking to prevent stale reads.
+            while self._analysis_in_progress is not None:
                 event = self._analysis_in_progress
-                # Release the lock while waiting
-            else:
-                event = None
+                # Release the lock while waiting so the running analysis can finish
+                self._charts_cache_lock.release()
+                try:
+                    await event.wait()
+                finally:
+                    await self._charts_cache_lock.acquire()
+                # After waking, re-check cache (analysis may have completed)
+                shared_cached = self._get_global_cached_charts(active_releases)
+                if shared_cached is not None:
+                    return shared_cached
 
-        if event is not None:
-            await event.wait()
-            # After the other analysis completes, try cache again
-            shared_cached = self._get_global_cached_charts(active_releases)
-            if shared_cached is not None:
-                return shared_cached
-
-        # Mark analysis as in progress
-        self._analysis_in_progress = asyncio.Event()
+            # Mark analysis as in progress (still under lock)
+            self._analysis_in_progress = asyncio.Event()
 
         try:
             try:
@@ -558,6 +560,10 @@ class ChartsController(BaseController):
         cache_key = (release, namespace)
         if raw_output:
             self._live_values_output_cache[cache_key] = raw_output
+            # Evict oldest entries (FIFO) when cache exceeds max size
+            while len(self._live_values_output_cache) > self._LIVE_VALUES_CACHE_MAX_ENTRIES:
+                first_key = next(iter(self._live_values_output_cache))
+                self._live_values_output_cache.pop(first_key, None)
         else:
             self._live_values_output_cache.pop(cache_key, None)
         return values

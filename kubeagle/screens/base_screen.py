@@ -169,9 +169,11 @@ class BaseScreen(Screen, ScreenNavigator):
         self.call_later(self.load_data)
 
     def on_unmount(self) -> None:
-        """Cancel any running workers when the screen is unmounted."""
+        """Cancel any running workers and clear stale state when the screen is unmounted."""
         with suppress(Exception):
             self.workers.cancel_all()
+        self._filter_stats = None
+        self._search_indicator = None
 
     @abstractmethod
     async def load_data(self) -> None:
@@ -235,6 +237,8 @@ class BaseScreen(Screen, ScreenNavigator):
     # DATATABLE HELPERS
     # =========================================================================
 
+    _TABLE_BATCH_INSERT_THRESHOLD = 500
+
     def populate_data_table(
         self,
         table_id: str,
@@ -243,6 +247,9 @@ class BaseScreen(Screen, ScreenNavigator):
         sort_column: int = -1,
     ) -> None:
         """Populate a DataTable with columns and data.
+
+        For large datasets (>500 rows), rows are added in batches to
+        avoid blocking the UI event loop for extended periods.
 
         Args:
             table_id: The ID of the DataTable widget.
@@ -257,9 +264,13 @@ class BaseScreen(Screen, ScreenNavigator):
         for col_name in columns:
             table.add_column(col_name)
 
-        # Add rows
-        for row in data:
-            table.add_row(*row)
+        # Add rows - use batch insertion for large datasets
+        row_count = len(data)
+        if row_count > self._TABLE_BATCH_INSERT_THRESHOLD:
+            table.add_rows([tuple(row) for row in data])
+        else:
+            for row in data:
+                table.add_row(*row)
 
         # Sort if requested
         if sort_column >= 0 and sort_column < len(columns):

@@ -117,6 +117,7 @@ class ClusterController(BaseController):
     _semaphore_max_concurrent: int = 3
     _global_kubectl_cache: dict[tuple[str, tuple[str, ...]], tuple[float, str]] = {}
     _global_helm_cache: dict[tuple[str, tuple[str, ...]], tuple[float, str]] = {}
+    _GLOBAL_COMMAND_CACHE_MAX_ENTRIES = 64  # Prevent unbounded memory growth
 
     @classmethod
     def get_semaphore(cls, max_concurrent: int | None = None) -> asyncio.Semaphore:
@@ -460,6 +461,13 @@ class ClusterController(BaseController):
             result = await task
             self._kubectl_cache[args] = result
             self._global_kubectl_cache[global_key] = (time.monotonic(), result)
+            # Evict oldest entries when cache exceeds max size
+            if len(self._global_kubectl_cache) > self._GLOBAL_COMMAND_CACHE_MAX_ENTRIES:
+                oldest_key = min(
+                    self._global_kubectl_cache,
+                    key=lambda k: self._global_kubectl_cache[k][0],
+                )
+                self._global_kubectl_cache.pop(oldest_key, None)
             return result
         finally:
             if self._kubectl_tasks.get(args) is task:
@@ -489,6 +497,13 @@ class ClusterController(BaseController):
             result = await task
             self._helm_cache[args] = result
             self._global_helm_cache[global_key] = (time.monotonic(), result)
+            # Evict oldest entries when cache exceeds max size
+            if len(self._global_helm_cache) > self._GLOBAL_COMMAND_CACHE_MAX_ENTRIES:
+                oldest_key = min(
+                    self._global_helm_cache,
+                    key=lambda k: self._global_helm_cache[k][0],
+                )
+                self._global_helm_cache.pop(oldest_key, None)
             return result
         finally:
             if self._helm_tasks.get(args) is task:
