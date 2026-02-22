@@ -11,7 +11,7 @@ CSS Classes: widget-custom-table
 
 from __future__ import annotations
 
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from typing import Any, ClassVar
 
 from textual.coordinate import Coordinate
@@ -52,8 +52,17 @@ class CustomTableBase(DataTable):
         if "classes" not in kwargs or not kwargs.get("classes"):
             kwargs["classes"] = self._DEFAULT_CLASSES
         super().__init__(*args, **kwargs)
-        self.styles.scrollbar_size_horizontal = 1
-        self.styles.scrollbar_size_vertical = 2
+
+    @contextmanager
+    def batch_update(self):
+        """Sync context manager that batches app updates to avoid intermediate repaints."""
+        try:
+            app_batch = self.app.batch_update()
+        except Exception:
+            yield
+            return
+        with app_batch:
+            yield
 
     def add_column(
         self,
@@ -82,12 +91,15 @@ class CustomTableBase(DataTable):
         pass
 
     def watch_data(self, data: list[dict]) -> None:
-        """Update UI when data changes.
+        """Update UI when data changes only if content actually changed.
 
         Args:
             data: The new data value.
         """
-        self.refresh()
+        new_sig = (id(data), len(data) if data else 0)
+        if getattr(self, "_last_data_signature", None) != new_sig:
+            self._last_data_signature = new_sig
+            self.refresh()
 
     def watch_error(self, error: str | None) -> None:
         """Handle error state changes.
@@ -121,15 +133,19 @@ class CustomTableBase(DataTable):
             return f"{original_label} [+]" if not self._sort_reverse else f"{original_label} [-]"
         return original_label
 
+    def _column_index_map(self) -> dict[str, int]:
+        """Return a cached mapping from column key to column index."""
+        cache = getattr(self, "_col_idx_cache", None)
+        if cache is None:
+            cache = {key: i for i, (_, key) in enumerate(self._COLUMN_DEFS)}
+            self._col_idx_cache: dict[str, int] = cache
+        return cache
+
     def _sort_value(
         self, row_data: tuple[Any, ...], column_key: str
     ) -> tuple[Any, ...]:
         """Extract sort key from row data, handling numeric columns."""
-        column_index = None
-        for i, (_, key) in enumerate(self._COLUMN_DEFS):
-            if key == column_key:
-                column_index = i
-                break
+        column_index = self._column_index_map().get(column_key)
 
         if column_index is None or column_index >= len(row_data):
             return row_data
@@ -186,90 +202,3 @@ class CustomTableBase(DataTable):
 
 # Backward compatibility alias - deprecated, use CustomTableBase instead
 CustomTableMixin = CustomTableBase
-
-
-# Standalone sort utilities for use with CustomDataTable wrapper
-
-def sort_rows(
-    rows: list[tuple[Any, ...]],
-    column_key: str,
-    column_defs: list[tuple[str, str]],
-    numeric_columns: set[str],
-    reverse: bool = False,
-) -> list[tuple[Any, ...]]:
-    """Sort rows by column value.
-
-    This is a standalone function for sorting table data.
-
-    Args:
-        rows: List of row tuples to sort.
-        column_key: The column key to sort by.
-        column_defs: List of (label, key) column definitions.
-        numeric_columns: Set of column keys that contain numeric values.
-        reverse: If True, sort in descending order.
-
-    Returns:
-        Sorted list of row tuples.
-    """
-    if not rows:
-        return rows
-
-    # Find column index
-    column_index = None
-    for i, (_, key) in enumerate(column_defs):
-        if key == column_key:
-            column_index = i
-            break
-
-    if column_index is None:
-        return rows
-
-    def sort_key(row_data: tuple[Any, ...]) -> tuple[Any, ...]:
-        if column_index >= len(row_data):
-            return (str(row_data).lower(), row_data)
-
-        value = row_data[column_index]
-        if column_key in numeric_columns:
-            try:
-                return (float(value), row_data)
-            except (ValueError, TypeError):
-                return (float("inf"), row_data)
-        return (str(value).lower(), row_data)
-
-    return sorted(rows, key=sort_key, reverse=reverse)
-
-
-def get_sort_indicator(
-    sort_column: str | None,
-    column_key: str,
-    reverse: bool,
-) -> str:
-    """Get sort indicator string for column label.
-
-    Args:
-        sort_column: Currently sorted column key.
-        column_key: The column key to check.
-        reverse: Whether sort is in reverse order.
-
-    Returns:
-        Sort indicator string or empty string.
-    """
-    if sort_column == column_key:
-        return " [+]" if not reverse else " [-]"
-    return ""
-
-
-def parse_sort_indicator(label: str) -> tuple[str, bool | None]:
-    """Parse sort indicator from column label.
-
-    Args:
-        label: Column label with optional sort indicator.
-
-    Returns:
-        Tuple of (cleaned_label, reverse or None).
-    """
-    if label.endswith(" [+]"):
-        return label[:-4], False
-    elif label.endswith(" [-]"):
-        return label[:-4], True
-    return label, None

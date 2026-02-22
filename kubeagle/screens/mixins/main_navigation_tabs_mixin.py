@@ -78,10 +78,10 @@ class MainNavigationTabsMixin:
 
 
 __all__ = [
-    "MAIN_NAV_TAB_CLUSTER",
     "MAIN_NAV_TAB_CHARTS",
-    "MAIN_NAV_TAB_WORKLOADS",
+    "MAIN_NAV_TAB_CLUSTER",
     "MAIN_NAV_TAB_EXPORT",
     "MAIN_NAV_TAB_SETTINGS",
+    "MAIN_NAV_TAB_WORKLOADS",
     "MainNavigationTabsMixin",
 ]

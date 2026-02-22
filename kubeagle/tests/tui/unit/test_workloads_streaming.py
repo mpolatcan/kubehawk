@@ -317,28 +317,18 @@ def test_partial_progress_without_new_rows_releases_overlay_once(
 def test_release_background_work_for_navigation_resets_loading_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Suspending the screen should cancel loading and arm a resume reload."""
+    """Suspending the screen should keep workers alive and arm a render-on-resume."""
     screen = WorkloadsScreen()
     screen._presenter._is_loading = True
     screen._is_loading = True
     screen._stream_overlay_released = False
 
-    cancel_calls: list[bool] = []
     hide_calls: list[bool] = []
     stop_calls: list[bool] = []
     stop_partial_calls: list[bool] = []
     stop_search_calls: list[bool] = []
     stop_resume_calls: list[bool] = []
 
-    monkeypatch.setattr(
-        WorkloadsScreen,
-        "workers",
-        property(
-            lambda _self: SimpleNamespace(
-                cancel_all=lambda: cancel_calls.append(True)
-            )
-        ),
-    )
     monkeypatch.setattr(screen, "hide_loading_overlay", lambda: hide_calls.append(True))
     monkeypatch.setattr(
         screen,
@@ -363,8 +353,8 @@ def test_release_background_work_for_navigation_resets_loading_state(
 
     screen._release_background_work_for_navigation()
 
-    assert cancel_calls == [True]
-    assert screen._reload_on_resume is True
+    # Workers are kept alive (not cancelled) so data can finish in the background
+    assert screen._render_on_resume is True
     assert screen._is_loading is False
     assert screen._stream_overlay_released is True
     assert stop_calls == [True]
@@ -419,6 +409,8 @@ def test_programmatic_tab_switch_avoids_duplicate_refresh_from_synthetic_event(
 
     monkeypatch.setattr(screen, "query_one", _query_one)
     monkeypatch.setattr(screen, "_refresh_active_tab", lambda: refresh_calls.append(True))
+    # call_later defers to the event loop; execute immediately in unit tests
+    monkeypatch.setattr(screen, "call_later", lambda fn, *a, **kw: fn(*a, **kw))
 
     screen._set_active_tab(TAB_WORKLOADS_EXTREME_RATIOS)
     screen._on_view_tab_activated(
@@ -716,6 +708,8 @@ def test_refresh_active_tab_reuses_filtered_workloads_for_summary_and_table(
 
     screen._refresh_active_tab()
 
-    assert presenter_calls == ["filtered", "scoped"]
-    assert summary_payloads == [(filtered_workloads, 12)]
+    # When there is no search query, get_scoped_workload_count is skipped
+    # (len(filtered_workloads) is used instead) to avoid a redundant filter pass.
+    assert presenter_calls == ["filtered"]
+    assert summary_payloads == [(filtered_workloads, len(filtered_workloads))]
     assert table_payloads == [(TAB_WORKLOADS_ALL, filtered_workloads)]

@@ -166,8 +166,8 @@ class TestChartsExplorerConstants:
 # =============================================================================
 
 __all__ = [
+    "TestChartsExplorerConstants",
+    "TestExplorerTableColumns",
     "TestViewFilterEnum",
     "TestViewTabOptions",
-    "TestExplorerTableColumns",
-    "TestChartsExplorerConstants",
 ]

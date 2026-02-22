@@ -386,11 +386,11 @@ class TestSettingsPresenterEdgeCases:
 # =============================================================================
 
 __all__ = [
-    "TestSettingsPresenterInitialization",
-    "TestSettingsPresenterProperties",
-    "TestSettingsPresenterLoadSettings",
-    "TestSettingsPresenterGetValue",
-    "TestSettingsPresenterValidation",
-    "TestSettingsPresenterParse",
     "TestSettingsPresenterEdgeCases",
+    "TestSettingsPresenterGetValue",
+    "TestSettingsPresenterInitialization",
+    "TestSettingsPresenterLoadSettings",
+    "TestSettingsPresenterParse",
+    "TestSettingsPresenterProperties",
+    "TestSettingsPresenterValidation",
 ]

@@ -271,10 +271,10 @@ class TestRemovedDetailPresenter:
 # =============================================================================
 
 __all__ = [
-    "TestOptimizerDataLoadedMessage",
-    "TestOptimizerDataLoadFailedMessage",
-    "TestTruncatedList",
     "TestBuildHelmRecommendations",
+    "TestOptimizerDataLoadFailedMessage",
+    "TestOptimizerDataLoadedMessage",
     "TestPresenterConstants",
     "TestRemovedDetailPresenter",
+    "TestTruncatedList",
 ]

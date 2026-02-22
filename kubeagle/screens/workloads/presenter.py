@@ -7,6 +7,9 @@ import logging
 import re
 from typing import Any
 
+# Pre-compiled regex for _extract_percent — avoids re-compiling on every sort comparison.
+_PERCENT_RE = re.compile(r"(-?\d+(?:\.\d+)?)\s*%")
+
 from textual.message import Message
 from textual.worker import get_current_worker
 
@@ -83,6 +86,34 @@ class WorkloadsDataLoadFailed(Message):
 class WorkloadsPresenter:
     """Presenter for WorkloadsScreen data and row formatting."""
 
+    # Class-level lookup for usage sort fields — avoids dict recreation on every sort call.
+    _USAGE_SORT_FIELDS: dict[str, str] = {
+        SORT_BY_NODE_CPU_USAGE_AVG: "node_real_cpu_avg",
+        SORT_BY_NODE_CPU_REQ_AVG: "cpu_req_util_avg",
+        SORT_BY_NODE_CPU_LIM_AVG: "cpu_lim_util_avg",
+        SORT_BY_NODE_CPU_USAGE_MAX: "node_real_cpu_max",
+        SORT_BY_NODE_CPU_REQ_MAX: "cpu_req_util_max",
+        SORT_BY_NODE_CPU_LIM_MAX: "cpu_lim_util_max",
+        SORT_BY_NODE_CPU_USAGE_P95: "node_real_cpu_p95",
+        SORT_BY_NODE_CPU_REQ_P95: "cpu_req_util_p95",
+        SORT_BY_NODE_CPU_LIM_P95: "cpu_lim_util_p95",
+        SORT_BY_NODE_MEM_USAGE_AVG: "node_real_memory_avg",
+        SORT_BY_NODE_MEM_REQ_AVG: "mem_req_util_avg",
+        SORT_BY_NODE_MEM_LIM_AVG: "mem_lim_util_avg",
+        SORT_BY_NODE_MEM_USAGE_MAX: "node_real_memory_max",
+        SORT_BY_NODE_MEM_REQ_MAX: "mem_req_util_max",
+        SORT_BY_NODE_MEM_LIM_MAX: "mem_lim_util_max",
+        SORT_BY_NODE_MEM_USAGE_P95: "node_real_memory_p95",
+        SORT_BY_NODE_MEM_REQ_P95: "mem_req_util_p95",
+        SORT_BY_NODE_MEM_LIM_P95: "mem_lim_util_p95",
+        SORT_BY_WORKLOAD_CPU_USAGE_AVG: "pod_real_cpu_avg",
+        SORT_BY_WORKLOAD_CPU_USAGE_MAX: "pod_real_cpu_max",
+        SORT_BY_WORKLOAD_CPU_USAGE_P95: "pod_real_cpu_p95",
+        SORT_BY_WORKLOAD_MEM_USAGE_AVG: "pod_real_memory_avg",
+        SORT_BY_WORKLOAD_MEM_USAGE_MAX: "pod_real_memory_max",
+        SORT_BY_WORKLOAD_MEM_USAGE_P95: "pod_real_memory_p95",
+    }
+
     def __init__(self, screen: Any) -> None:
         self._screen = screen
         self._is_loading = False
@@ -93,6 +124,9 @@ class WorkloadsPresenter:
         self._data: dict[str, Any] = {
             "all_workloads": [],
         }
+        # Reusable controller instance — avoids re-creating ClusterController
+        # (and re-resolving context) for each fetch_live_usage_sample call.
+        self._cached_ctrl: ClusterController | None = None
 
     @property
     def is_loading(self) -> bool:
@@ -164,14 +198,14 @@ class WorkloadsPresenter:
                 getattr(self._screen, "context", None)
                 or getattr(app, "context", None)
             )
-            current_context = await asyncio.to_thread(
-                ClusterController.resolve_current_context
-            )
+            current_context = await ClusterController.resolve_current_context_async()
             context = current_context or configured_context
 
             if force_refresh:
                 ClusterController.clear_global_command_cache(context=context)
             ctrl = ClusterController(context=context)
+            # Cache controller for reuse by fetch_live_usage_sample
+            self._cached_ctrl = ctrl
 
             msg("Loading workloads...")
             streamed_row_count = 0
@@ -182,16 +216,16 @@ class WorkloadsPresenter:
                 total: int,
             ) -> None:
                 nonlocal streamed_row_count
-                self._data["all_workloads"] = list(partial_rows)
                 current_row_count = len(partial_rows)
                 has_new_rows = current_row_count > streamed_row_count
                 if has_new_rows:
+                    self._data["all_workloads"] = list(partial_rows)
                     streamed_row_count = current_row_count
                 msg(
                     "Loading workloads "
                     f"({completed}/{total} namespaces, {current_row_count} workloads)..."
                 )
-                if bool(getattr(self._screen, "is_current", True)):
+                if has_new_rows and bool(getattr(self._screen, "is_current", True)):
                     self._screen.call_later(
                         lambda: self._screen.post_message(
                             WorkloadsSourceLoaded(
@@ -240,24 +274,27 @@ class WorkloadsPresenter:
         finally:
             self._is_loading = False
 
-    def get_source_value(self, key: str) -> Any:
-        return self._data.get(key)
-
     def get_all_workloads(self) -> list:
         return self._data.get("all_workloads", [])
 
     async def fetch_live_usage_sample(self, workload: Any) -> WorkloadLiveUsageSampleInfo:
-        """Fetch one targeted live usage sample for a selected workload."""
-        app = getattr(self._screen, "app", None)
-        configured_context = (
-            getattr(self._screen, "context", None)
-            or getattr(app, "context", None)
-        )
-        current_context = await asyncio.to_thread(
-            ClusterController.resolve_current_context
-        )
-        context = current_context or configured_context
-        ctrl = ClusterController(context=context)
+        """Fetch one targeted live usage sample for a selected workload.
+
+        Reuses the controller instance from the last data load to avoid
+        re-instantiation and redundant context resolution subprocess calls.
+        """
+        ctrl = self._cached_ctrl
+        if ctrl is None:
+            # Fallback: create a new controller if none cached yet
+            app = getattr(self._screen, "app", None)
+            configured_context = (
+                getattr(self._screen, "context", None)
+                or getattr(app, "context", None)
+            )
+            current_context = await ClusterController.resolve_current_context_async()
+            context = current_context or configured_context
+            ctrl = ClusterController(context=context)
+            self._cached_ctrl = ctrl
         return await ctrl.fetch_workload_live_usage_sample(
             namespace=str(getattr(workload, "namespace", "") or ""),
             workload_kind=str(getattr(workload, "kind", "") or ""),
@@ -307,10 +344,6 @@ class WorkloadsPresenter:
         if lowered_status in {"notready", "failed"}:
             return f"[bold #ff3b30]{text}[/bold #ff3b30]"
         return text
-
-    @classmethod
-    def _format_status(cls, status_text: str) -> str:
-        return cls._format_text_by_status(status_text, status_text)
 
     @staticmethod
     def _normalize_text(value: Any) -> str:
@@ -490,7 +523,7 @@ class WorkloadsPresenter:
         if value == "-":
             return None
 
-        match = re.search(r"(-?\d+(?:\.\d+)?)\s*%", value)
+        match = _PERCENT_RE.search(value)
         if not match:
             try:
                 return float(value.rstrip("%").strip())
@@ -701,6 +734,10 @@ class WorkloadsPresenter:
         if not workloads:
             return []
 
+        # Check class-level usage sort fields first to avoid repeated dict
+        # lookups inside the per-workload closure.
+        usage_attr = self._USAGE_SORT_FIELDS.get(sort_by)
+
         def _value(workload: Any) -> str | float | None:
             if sort_by == "namespace":
                 return self._normalize_text(getattr(workload, "namespace", ""))
@@ -733,35 +770,9 @@ class WorkloadsPresenter:
                     return None
             if sort_by == "status":
                 return self._normalize_text(getattr(workload, "status", ""))
-            usage_sort_fields: dict[str, str] = {
-                SORT_BY_NODE_CPU_USAGE_AVG: "node_real_cpu_avg",
-                SORT_BY_NODE_CPU_REQ_AVG: "cpu_req_util_avg",
-                SORT_BY_NODE_CPU_LIM_AVG: "cpu_lim_util_avg",
-                SORT_BY_NODE_CPU_USAGE_MAX: "node_real_cpu_max",
-                SORT_BY_NODE_CPU_REQ_MAX: "cpu_req_util_max",
-                SORT_BY_NODE_CPU_LIM_MAX: "cpu_lim_util_max",
-                SORT_BY_NODE_CPU_USAGE_P95: "node_real_cpu_p95",
-                SORT_BY_NODE_CPU_REQ_P95: "cpu_req_util_p95",
-                SORT_BY_NODE_CPU_LIM_P95: "cpu_lim_util_p95",
-                SORT_BY_NODE_MEM_USAGE_AVG: "node_real_memory_avg",
-                SORT_BY_NODE_MEM_REQ_AVG: "mem_req_util_avg",
-                SORT_BY_NODE_MEM_LIM_AVG: "mem_lim_util_avg",
-                SORT_BY_NODE_MEM_USAGE_MAX: "node_real_memory_max",
-                SORT_BY_NODE_MEM_REQ_MAX: "mem_req_util_max",
-                SORT_BY_NODE_MEM_LIM_MAX: "mem_lim_util_max",
-                SORT_BY_NODE_MEM_USAGE_P95: "node_real_memory_p95",
-                SORT_BY_NODE_MEM_REQ_P95: "mem_req_util_p95",
-                SORT_BY_NODE_MEM_LIM_P95: "mem_lim_util_p95",
-                SORT_BY_WORKLOAD_CPU_USAGE_AVG: "pod_real_cpu_avg",
-                SORT_BY_WORKLOAD_CPU_USAGE_MAX: "pod_real_cpu_max",
-                SORT_BY_WORKLOAD_CPU_USAGE_P95: "pod_real_cpu_p95",
-                SORT_BY_WORKLOAD_MEM_USAGE_AVG: "pod_real_memory_avg",
-                SORT_BY_WORKLOAD_MEM_USAGE_MAX: "pod_real_memory_max",
-                SORT_BY_WORKLOAD_MEM_USAGE_P95: "pod_real_memory_p95",
-            }
-            if sort_by in usage_sort_fields:
+            if usage_attr is not None:
                 return self._extract_percent(
-                    getattr(workload, usage_sort_fields[sort_by], None)
+                    getattr(workload, usage_attr, None)
                 )
             return self._normalize_text(getattr(workload, "name", ""))
 
@@ -802,96 +813,114 @@ class WorkloadsPresenter:
         except (TypeError, ValueError):
             return False
 
-    def _build_workload_row_cells(self, workload: Any) -> dict[str, str]:
-        desired_raw = getattr(workload, "desired_replicas", None)
-        ready_raw = getattr(workload, "ready_replicas", None)
-        workload_name = str(getattr(workload, "name", "") or "")
-        helm_release_raw = str(getattr(workload, "helm_release", "") or "").strip()
-        helm_release = helm_release_raw if helm_release_raw else "-"
-        has_helm_release = helm_release != "-"
-        has_pdb = bool(getattr(workload, "has_pdb", False))
-        pdb_state = "[#30d158]Yes[/#30d158]" if has_pdb else "[bold #ff3b30]No[/bold #ff3b30]"
-        status_text = str(getattr(workload, "status", "Unknown") or "Unknown")
-        name_prefix = f"{self._format_text_by_status('⎈', status_text)} " if has_helm_release else ""
-        styled_name = self._format_text_by_status(workload_name, status_text)
-        desired_ready_badge = self._format_desired_ready_badge(desired_raw, ready_raw)
-
-        cpu_request = float(getattr(workload, "cpu_request", 0.0) or 0.0)
-        cpu_limit = float(getattr(workload, "cpu_limit", 0.0) or 0.0)
-        memory_request = float(getattr(workload, "memory_request", 0.0) or 0.0)
-        memory_limit = float(getattr(workload, "memory_limit", 0.0) or 0.0)
-        cpu_ratio = self._format_ratio(cpu_request, cpu_limit)
-        memory_ratio = self._format_ratio(memory_request, memory_limit)
-
-        return {
-            "Namespace": str(getattr(workload, "namespace", "")),
-            "Kind": str(getattr(workload, "kind", "")),
-            "Name": f"{name_prefix}{styled_name} [dim]·[/dim] {desired_ready_badge}",
-            "Restarts": self._format_restart_count(
-                getattr(workload, "restart_count", 0),
-                getattr(workload, "restart_reason_counts", {}),
-            ),
-            "CPU R/L": self._format_req_lim_with_ratio(
-                self._format_cpu(cpu_request),
-                self._format_cpu(cpu_limit),
-                cpu_ratio,
-            ),
-            "Mem R/L": self._format_req_lim_with_ratio(
-                self._format_memory(memory_request),
-                self._format_memory(memory_limit),
-                memory_ratio,
-            ),
-            "PDB": pdb_state,
-            "Nodes": str(getattr(workload, "assigned_nodes", "-") or "-"),
-            "Node CPU Usage/Req/Lim Avg": self._format_compact_triplet(
-                self._format_usage_value(getattr(workload, "node_real_cpu_avg", "-")),
-                self._format_utilization_value(getattr(workload, "cpu_req_util_avg", "-")),
-                self._format_utilization_value(getattr(workload, "cpu_lim_util_avg", "-")),
-            ),
-            "Node CPU Usage/Req/Lim Max": self._format_compact_triplet(
-                self._format_usage_value(getattr(workload, "node_real_cpu_max", "-")),
-                self._format_utilization_value(getattr(workload, "cpu_req_util_max", "-")),
-                self._format_utilization_value(getattr(workload, "cpu_lim_util_max", "-")),
-            ),
-            "Node CPU Usage/Req/Lim P95": self._format_compact_triplet(
-                self._format_usage_value(getattr(workload, "node_real_cpu_p95", "-")),
-                self._format_utilization_value(getattr(workload, "cpu_req_util_p95", "-")),
-                self._format_utilization_value(getattr(workload, "cpu_lim_util_p95", "-")),
-            ),
-            "Node Mem Usage/Req/Lim Avg": self._format_compact_triplet(
-                self._format_usage_value(getattr(workload, "node_real_memory_avg", "-")),
-                self._format_utilization_value(getattr(workload, "mem_req_util_avg", "-")),
-                self._format_utilization_value(getattr(workload, "mem_lim_util_avg", "-")),
-            ),
-            "Node Mem Usage/Req/Lim Max": self._format_compact_triplet(
-                self._format_usage_value(getattr(workload, "node_real_memory_max", "-")),
-                self._format_utilization_value(getattr(workload, "mem_req_util_max", "-")),
-                self._format_utilization_value(getattr(workload, "mem_lim_util_max", "-")),
-            ),
-            "Node Mem Usage/Req/Lim P95": self._format_compact_triplet(
-                self._format_usage_value(getattr(workload, "node_real_memory_p95", "-")),
-                self._format_utilization_value(getattr(workload, "mem_req_util_p95", "-")),
-                self._format_utilization_value(getattr(workload, "mem_lim_util_p95", "-")),
-            ),
-            "Workload CPU Usage Avg/Max/P95": self._format_compact_triplet(
-                self._format_usage_value(getattr(workload, "pod_real_cpu_avg", "-")),
-                self._format_usage_value(getattr(workload, "pod_real_cpu_max", "-")),
-                self._format_usage_value(getattr(workload, "pod_real_cpu_p95", "-")),
-            ),
-            "Workload Mem Usage Avg/Max/P95": self._format_compact_triplet(
-                self._format_usage_value(getattr(workload, "pod_real_memory_avg", "-")),
-                self._format_usage_value(getattr(workload, "pod_real_memory_max", "-")),
-                self._format_usage_value(getattr(workload, "pod_real_memory_p95", "-")),
-            ),
-        }
-
     def _format_workload_row(
         self,
         workload: Any,
         *,
         columns: list[tuple[str, int]],
+        _needed_columns: frozenset[str] | None = None,
     ) -> tuple[str, ...]:
-        cells = self._build_workload_row_cells(workload)
+        """Format a single workload into a row tuple, computing only needed columns.
+
+        When ``_needed_columns`` is provided (a frozenset of column name strings),
+        only columns present in that set are computed.  This avoids the cost of
+        formatting expensive node/workload usage triplets for the 4 base-column
+        tabs that never display them.
+        """
+        needed = _needed_columns
+        cells: dict[str, str] = {}
+
+        # --- Base columns (cheap, always computed) ---
+        cells["Namespace"] = str(getattr(workload, "namespace", ""))
+        cells["Kind"] = str(getattr(workload, "kind", ""))
+
+        desired_raw = getattr(workload, "desired_replicas", None)
+        ready_raw = getattr(workload, "ready_replicas", None)
+        workload_name = str(getattr(workload, "name", "") or "")
+        helm_release_raw = str(getattr(workload, "helm_release", "") or "").strip()
+        has_helm_release = bool(helm_release_raw)
+        status_text = str(getattr(workload, "status", "Unknown") or "Unknown")
+        name_prefix = f"{self._format_text_by_status('⎈', status_text)} " if has_helm_release else ""
+        styled_name = self._format_text_by_status(workload_name, status_text)
+        desired_ready_badge = self._format_desired_ready_badge(desired_raw, ready_raw)
+        cells["Name"] = f"{name_prefix}{styled_name} [dim]·[/dim] {desired_ready_badge}"
+
+        cells["Restarts"] = self._format_restart_count(
+            getattr(workload, "restart_count", 0),
+            getattr(workload, "restart_reason_counts", {}),
+        )
+
+        cpu_request = float(getattr(workload, "cpu_request", 0.0) or 0.0)
+        cpu_limit = float(getattr(workload, "cpu_limit", 0.0) or 0.0)
+        memory_request = float(getattr(workload, "memory_request", 0.0) or 0.0)
+        memory_limit = float(getattr(workload, "memory_limit", 0.0) or 0.0)
+        cells["CPU R/L"] = self._format_req_lim_with_ratio(
+            self._format_cpu(cpu_request),
+            self._format_cpu(cpu_limit),
+            self._format_ratio(cpu_request, cpu_limit),
+        )
+        cells["Mem R/L"] = self._format_req_lim_with_ratio(
+            self._format_memory(memory_request),
+            self._format_memory(memory_limit),
+            self._format_ratio(memory_request, memory_limit),
+        )
+
+        has_pdb = bool(getattr(workload, "has_pdb", False))
+        cells["PDB"] = "[#30d158]Yes[/#30d158]" if has_pdb else "[bold #ff3b30]No[/bold #ff3b30]"
+
+        # --- Expensive node/workload usage columns (only for Node Analysis tab) ---
+        if needed is None or "Nodes" in needed:
+            cells["Nodes"] = str(getattr(workload, "assigned_nodes", "-") or "-")
+
+        if needed is None or "Node CPU Usage/Req/Lim Avg" in needed:
+            cells["Node CPU Usage/Req/Lim Avg"] = self._format_compact_triplet(
+                self._format_usage_value(getattr(workload, "node_real_cpu_avg", "-")),
+                self._format_utilization_value(getattr(workload, "cpu_req_util_avg", "-")),
+                self._format_utilization_value(getattr(workload, "cpu_lim_util_avg", "-")),
+            )
+        if needed is None or "Node CPU Usage/Req/Lim Max" in needed:
+            cells["Node CPU Usage/Req/Lim Max"] = self._format_compact_triplet(
+                self._format_usage_value(getattr(workload, "node_real_cpu_max", "-")),
+                self._format_utilization_value(getattr(workload, "cpu_req_util_max", "-")),
+                self._format_utilization_value(getattr(workload, "cpu_lim_util_max", "-")),
+            )
+        if needed is None or "Node CPU Usage/Req/Lim P95" in needed:
+            cells["Node CPU Usage/Req/Lim P95"] = self._format_compact_triplet(
+                self._format_usage_value(getattr(workload, "node_real_cpu_p95", "-")),
+                self._format_utilization_value(getattr(workload, "cpu_req_util_p95", "-")),
+                self._format_utilization_value(getattr(workload, "cpu_lim_util_p95", "-")),
+            )
+        if needed is None or "Node Mem Usage/Req/Lim Avg" in needed:
+            cells["Node Mem Usage/Req/Lim Avg"] = self._format_compact_triplet(
+                self._format_usage_value(getattr(workload, "node_real_memory_avg", "-")),
+                self._format_utilization_value(getattr(workload, "mem_req_util_avg", "-")),
+                self._format_utilization_value(getattr(workload, "mem_lim_util_avg", "-")),
+            )
+        if needed is None or "Node Mem Usage/Req/Lim Max" in needed:
+            cells["Node Mem Usage/Req/Lim Max"] = self._format_compact_triplet(
+                self._format_usage_value(getattr(workload, "node_real_memory_max", "-")),
+                self._format_utilization_value(getattr(workload, "mem_req_util_max", "-")),
+                self._format_utilization_value(getattr(workload, "mem_lim_util_max", "-")),
+            )
+        if needed is None or "Node Mem Usage/Req/Lim P95" in needed:
+            cells["Node Mem Usage/Req/Lim P95"] = self._format_compact_triplet(
+                self._format_usage_value(getattr(workload, "node_real_memory_p95", "-")),
+                self._format_utilization_value(getattr(workload, "mem_req_util_p95", "-")),
+                self._format_utilization_value(getattr(workload, "mem_lim_util_p95", "-")),
+            )
+        if needed is None or "Workload CPU Usage Avg/Max/P95" in needed:
+            cells["Workload CPU Usage Avg/Max/P95"] = self._format_compact_triplet(
+                self._format_usage_value(getattr(workload, "pod_real_cpu_avg", "-")),
+                self._format_usage_value(getattr(workload, "pod_real_cpu_max", "-")),
+                self._format_usage_value(getattr(workload, "pod_real_cpu_p95", "-")),
+            )
+        if needed is None or "Workload Mem Usage Avg/Max/P95" in needed:
+            cells["Workload Mem Usage Avg/Max/P95"] = self._format_compact_triplet(
+                self._format_usage_value(getattr(workload, "pod_real_memory_avg", "-")),
+                self._format_usage_value(getattr(workload, "pod_real_memory_max", "-")),
+                self._format_usage_value(getattr(workload, "pod_real_memory_p95", "-")),
+            )
+
         return tuple(cells.get(column_name, "-") for column_name, _ in columns)
 
     def get_resource_rows(
@@ -932,10 +961,14 @@ class WorkloadsPresenter:
         columns: list[tuple[str, int]] | None = None,
     ) -> list[tuple[str, ...]]:
         effective_columns = columns or WORKLOADS_RESOURCE_BASE_COLUMNS
+        # Build a frozenset of needed column names so _format_workload_row
+        # can skip computing expensive columns that aren't displayed.
+        needed = frozenset(name for name, _ in effective_columns)
         return [
             self._format_workload_row(
                 workload,
                 columns=effective_columns,
+                _needed_columns=needed,
             )
             for workload in workloads
         ]
@@ -1037,60 +1070,58 @@ class WorkloadsPresenter:
 
     def get_assigned_node_detail_rows(self, workload: Any) -> list[tuple[str, ...]]:
         details = list(getattr(workload, "assigned_node_details", []) or [])
-        rows: list[tuple[str, ...]] = []
-        for detail in details:
-            rows.append(
-                (
-                    str(getattr(detail, "node_name", "-") or "-"),
-                    str(getattr(detail, "node_group", "Unknown") or "Unknown"),
-                    str(int(getattr(detail, "workload_pod_count_on_node", 0) or 0)),
-                    self._format_percentage(getattr(detail, "node_cpu_req_pct", None)),
-                    self._format_percentage(getattr(detail, "node_cpu_lim_pct", None)),
-                    self._format_percentage(getattr(detail, "node_mem_req_pct", None)),
-                    self._format_percentage(getattr(detail, "node_mem_lim_pct", None)),
-                    self._format_usage_with_percentage(
-                        self._format_runtime_cpu(
-                            getattr(detail, "node_real_cpu_mcores", None)
-                        ),
-                        self._format_percentage(
-                            getattr(detail, "node_real_cpu_pct_of_allocatable", None)
-                        ),
+        return [
+            (
+                str(getattr(detail, "node_name", "-") or "-"),
+                str(getattr(detail, "node_group", "Unknown") or "Unknown"),
+                str(int(getattr(detail, "workload_pod_count_on_node", 0) or 0)),
+                self._format_percentage(getattr(detail, "node_cpu_req_pct", None)),
+                self._format_percentage(getattr(detail, "node_cpu_lim_pct", None)),
+                self._format_percentage(getattr(detail, "node_mem_req_pct", None)),
+                self._format_percentage(getattr(detail, "node_mem_lim_pct", None)),
+                self._format_usage_with_percentage(
+                    self._format_runtime_cpu(
+                        getattr(detail, "node_real_cpu_mcores", None)
                     ),
-                    self._format_usage_with_percentage(
-                        self._format_runtime_memory(
-                            getattr(detail, "node_real_memory_bytes", None)
-                        ),
-                        self._format_percentage(
-                            getattr(detail, "node_real_memory_pct_of_allocatable", None)
-                        ),
+                    self._format_percentage(
+                        getattr(detail, "node_real_cpu_pct_of_allocatable", None)
                     ),
-                    self._format_usage_with_percentage(
-                        self._format_runtime_cpu(
-                            getattr(detail, "workload_pod_real_cpu_mcores_on_node", None)
-                        ),
-                        self._format_percentage(
-                            getattr(
-                                detail,
-                                "workload_pod_real_cpu_pct_of_node_allocatable",
-                                None,
-                            )
-                        ),
+                ),
+                self._format_usage_with_percentage(
+                    self._format_runtime_memory(
+                        getattr(detail, "node_real_memory_bytes", None)
                     ),
-                    self._format_usage_with_percentage(
-                        self._format_runtime_memory(
-                            getattr(detail, "workload_pod_real_memory_bytes_on_node", None)
-                        ),
-                        self._format_percentage(
-                            getattr(
-                                detail,
-                                "workload_pod_real_memory_pct_of_node_allocatable",
-                                None,
-                            )
-                        ),
+                    self._format_percentage(
+                        getattr(detail, "node_real_memory_pct_of_allocatable", None)
                     ),
-                )
+                ),
+                self._format_usage_with_percentage(
+                    self._format_runtime_cpu(
+                        getattr(detail, "workload_pod_real_cpu_mcores_on_node", None)
+                    ),
+                    self._format_percentage(
+                        getattr(
+                            detail,
+                            "workload_pod_real_cpu_pct_of_node_allocatable",
+                            None,
+                        )
+                    ),
+                ),
+                self._format_usage_with_percentage(
+                    self._format_runtime_memory(
+                        getattr(detail, "workload_pod_real_memory_bytes_on_node", None)
+                    ),
+                    self._format_percentage(
+                        getattr(
+                            detail,
+                            "workload_pod_real_memory_pct_of_node_allocatable",
+                            None,
+                        )
+                    ),
+                ),
             )
-        return rows
+            for detail in details
+        ]
 
     def get_assigned_pod_detail_rows(self, workload: Any) -> list[tuple[str, ...]]:
         details = list(getattr(workload, "assigned_pod_details", []) or [])

@@ -6,7 +6,6 @@ from kubeagle.utils.resource_parser import (
     memory_str_to_bytes,
     parse_cpu,
     parse_cpu_from_dict,
-    parse_memory,
     parse_memory_from_dict,
 )
 
@@ -43,42 +42,6 @@ class TestParseCpu:
     def test_parse_cpu_with_whitespace(self) -> None:
         """Test parsing CPU string with whitespace."""
         assert parse_cpu(" 100m ") == 0.1
-
-
-class TestParseMemory:
-    """Tests for parse_memory function."""
-
-    def test_parse_memory_mebibytes(self) -> None:
-        """Test parsing memory in Mi."""
-        assert parse_memory("512Mi") == 512.0
-        assert parse_memory("1024Mi") == 1024.0
-
-    def test_parse_memory_gibibytes(self) -> None:
-        """Test parsing memory in Gi."""
-        assert parse_memory("1Gi") == 1024.0
-        assert parse_memory("2Gi") == 2048.0
-
-    def test_parse_memory_kibibytes(self) -> None:
-        """Test parsing memory in Ki."""
-        assert parse_memory("1024Ki") == 1.0
-        assert parse_memory("2048Ki") == 2.0
-
-    def test_parse_memory_tebibytes(self) -> None:
-        """Test parsing memory in Ti."""
-        assert parse_memory("1Ti") == 1048576.0
-
-    def test_parse_memory_bytes(self) -> None:
-        """Test parsing memory in plain bytes."""
-        result = parse_memory("1048576")  # 1 Mi in bytes
-        assert result == 1.0
-
-    def test_parse_memory_empty(self) -> None:
-        """Test parsing empty memory string."""
-        assert parse_memory("") == 0.0
-
-    def test_parse_memory_invalid(self) -> None:
-        """Test parsing invalid memory string."""
-        assert parse_memory("invalid") == 0.0
 
 
 class TestMemoryStrToBytes:

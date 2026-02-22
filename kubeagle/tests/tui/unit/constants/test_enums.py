@@ -5,7 +5,6 @@ Tests cover:
 - Value correctness
 - Membership tests
 - String representation
-- Backward-compatibility aliases
 """
 
 from __future__ import annotations
@@ -16,22 +15,14 @@ import pytest
 
 from kubeagle.constants.enums import (
     AppState,
-    DataRefreshMode,
-    FetchSources,
     FetchState,
-    FilterOperator,
-    LoadingState,
-    NavigationMode,
     NodeStatus,
     QoSClass,
     Severity,
-    SortDirection,
-    SortField,
-    TabState,
+    SortBy,
     ThemeMode,
-    node_status,
-    qos_class,
-    severity,
+    ViewFilter,
+    WidgetCategory,
 )
 
 # =============================================================================
@@ -120,24 +111,6 @@ class TestSeverity:
 
 
 # =============================================================================
-# Backward compatibility aliases
-# =============================================================================
-
-
-class TestBackwardCompatAliases:
-    """Test lowercase aliases for backward compatibility."""
-
-    def test_node_status_alias(self) -> None:
-        assert node_status is NodeStatus
-
-    def test_qos_class_alias(self) -> None:
-        assert qos_class is QoSClass
-
-    def test_severity_alias(self) -> None:
-        assert severity is Severity
-
-
-# =============================================================================
 # AppState
 # =============================================================================
 
@@ -165,39 +138,6 @@ class TestAppState:
 
 
 # =============================================================================
-# LoadingState
-# =============================================================================
-
-
-class TestLoadingState:
-    """Test LoadingState enum (alias for AppState)."""
-
-    def test_is_enum(self) -> None:
-        assert issubclass(LoadingState, Enum)
-
-    def test_members_count(self) -> None:
-        assert len(LoadingState) == 4
-
-    def test_idle_value(self) -> None:
-        assert LoadingState.IDLE.value == "idle"
-
-    def test_loading_value(self) -> None:
-        assert LoadingState.LOADING.value == "loading"
-
-    def test_error_value(self) -> None:
-        assert LoadingState.ERROR.value == "error"
-
-    def test_stale_value(self) -> None:
-        assert LoadingState.STALE.value == "stale"
-
-    def test_same_values_as_app_state(self) -> None:
-        """LoadingState should mirror AppState member values."""
-        for member in AppState:
-            assert hasattr(LoadingState, member.name)
-            assert LoadingState[member.name].value == member.value
-
-
-# =============================================================================
 # FetchState
 # =============================================================================
 
@@ -222,67 +162,6 @@ class TestFetchState:
 
 
 # =============================================================================
-# FetchSources
-# =============================================================================
-
-
-class TestFetchSources:
-    """Test FetchSources enum."""
-
-    def test_is_enum(self) -> None:
-        assert issubclass(FetchSources, Enum)
-
-    def test_members_count(self) -> None:
-        assert len(FetchSources) == 7
-
-    def test_nodes_value(self) -> None:
-        assert FetchSources.NODES.value == "nodes"
-
-    def test_events_value(self) -> None:
-        assert FetchSources.EVENTS.value == "events"
-
-    def test_pod_disruption_budgets_value(self) -> None:
-        assert FetchSources.POD_DISRUPTION_BUDGETS.value == "pod_disruption_budgets"
-
-    def test_helm_releases_value(self) -> None:
-        assert FetchSources.HELM_RELEASES.value == "helm_releases"
-
-    def test_node_resources_value(self) -> None:
-        assert FetchSources.NODE_RESOURCES.value == "node_resources"
-
-    def test_pod_distribution_value(self) -> None:
-        assert FetchSources.POD_DISTRIBUTION.value == "pod_distribution"
-
-    def test_cluster_connection_value(self) -> None:
-        assert FetchSources.CLUSTER_CONNECTION.value == "cluster_connection"
-
-
-# =============================================================================
-# TabState
-# =============================================================================
-
-
-class TestTabState:
-    """Test TabState enum (auto-valued)."""
-
-    def test_is_enum(self) -> None:
-        assert issubclass(TabState, Enum)
-
-    def test_members_count(self) -> None:
-        assert len(TabState) == 4
-
-    def test_all_members_exist(self) -> None:
-        assert hasattr(TabState, "IDLE")
-        assert hasattr(TabState, "LOADING")
-        assert hasattr(TabState, "LOADED")
-        assert hasattr(TabState, "ERROR")
-
-    def test_members_are_distinct(self) -> None:
-        values = [m.value for m in TabState]
-        assert len(values) == len(set(values))
-
-
-# =============================================================================
 # ThemeMode
 # =============================================================================
 
@@ -304,132 +183,69 @@ class TestThemeMode:
 
 
 # =============================================================================
-# SortDirection
+# ViewFilter
 # =============================================================================
 
 
-class TestSortDirection:
-    """Test SortDirection enum."""
+class TestViewFilter:
+    """Test ViewFilter enum."""
 
     def test_is_enum(self) -> None:
-        assert issubclass(SortDirection, Enum)
+        assert issubclass(ViewFilter, Enum)
 
     def test_members_count(self) -> None:
-        assert len(SortDirection) == 2
+        assert len(ViewFilter) == 5
 
-    def test_asc_value(self) -> None:
-        assert SortDirection.ASC.value == "asc"
+    def test_all_value(self) -> None:
+        assert ViewFilter.ALL.value == "all"
 
-    def test_desc_value(self) -> None:
-        assert SortDirection.DESC.value == "desc"
+    def test_extreme_ratios_value(self) -> None:
+        assert ViewFilter.EXTREME_RATIOS.value == "extreme_ratios"
+
+    def test_single_replica_value(self) -> None:
+        assert ViewFilter.SINGLE_REPLICA.value == "single_replica"
+
+    def test_no_pdb_value(self) -> None:
+        assert ViewFilter.NO_PDB.value == "no_pdb"
+
+    def test_with_violations_value(self) -> None:
+        assert ViewFilter.WITH_VIOLATIONS.value == "with_violations"
 
 
 # =============================================================================
-# FilterOperator
+# SortBy
 # =============================================================================
 
 
-class TestFilterOperator:
-    """Test FilterOperator enum."""
+class TestSortBy:
+    """Test SortBy enum."""
 
     def test_is_enum(self) -> None:
-        assert issubclass(FilterOperator, Enum)
+        assert issubclass(SortBy, Enum)
 
     def test_members_count(self) -> None:
-        assert len(FilterOperator) == 5
+        assert len(SortBy) == 12
 
-    def test_equals_value(self) -> None:
-        assert FilterOperator.EQUALS.value == "eq"
-
-    def test_not_equals_value(self) -> None:
-        assert FilterOperator.NOT_EQUALS.value == "ne"
-
-    def test_contains_value(self) -> None:
-        assert FilterOperator.CONTAINS.value == "contains"
-
-    def test_starts_with_value(self) -> None:
-        assert FilterOperator.STARTS_WITH.value == "startswith"
-
-    def test_ends_with_value(self) -> None:
-        assert FilterOperator.ENDS_WITH.value == "endswith"
-
-
-# =============================================================================
-# DataRefreshMode
-# =============================================================================
-
-
-class TestDataRefreshMode:
-    """Test DataRefreshMode enum."""
-
-    def test_is_enum(self) -> None:
-        assert issubclass(DataRefreshMode, Enum)
-
-    def test_members_count(self) -> None:
-        assert len(DataRefreshMode) == 3
-
-    def test_manual_value(self) -> None:
-        assert DataRefreshMode.MANUAL.value == "manual"
-
-    def test_auto_value(self) -> None:
-        assert DataRefreshMode.AUTO.value == "auto"
-
-    def test_interval_value(self) -> None:
-        assert DataRefreshMode.INTERVAL.value == "interval"
-
-
-# =============================================================================
-# NavigationMode
-# =============================================================================
-
-
-class TestNavigationMode:
-    """Test NavigationMode enum."""
-
-    def test_is_enum(self) -> None:
-        assert issubclass(NavigationMode, Enum)
-
-    def test_members_count(self) -> None:
-        assert len(NavigationMode) == 3
-
-    def test_tree_value(self) -> None:
-        assert NavigationMode.TREE.value == "tree"
-
-    def test_list_value(self) -> None:
-        assert NavigationMode.LIST.value == "list"
-
-    def test_grid_value(self) -> None:
-        assert NavigationMode.GRID.value == "grid"
-
-
-# =============================================================================
-# SortField
-# =============================================================================
-
-
-class TestSortField:
-    """Test SortField enum."""
-
-    def test_is_enum(self) -> None:
-        assert issubclass(SortField, Enum)
-
-    def test_members_count(self) -> None:
-        assert len(SortField) == 5
-
-    def test_name_value(self) -> None:
-        assert SortField.NAME.value == "name"
-
-    def test_version_value(self) -> None:
-        assert SortField.VERSION.value == "version"
+    def test_chart_value(self) -> None:
+        assert SortBy.CHART.value == "chart"
 
     def test_team_value(self) -> None:
-        assert SortField.TEAM.value == "team"
+        assert SortBy.TEAM.value == "team"
 
-    def test_status_value(self) -> None:
-        assert SortField.STATUS.value == "status"
 
-    def test_created_value(self) -> None:
-        assert SortField.CREATED.value == "created"
+# =============================================================================
+# WidgetCategory
+# =============================================================================
+
+
+class TestWidgetCategory:
+    """Test WidgetCategory enum."""
+
+    def test_is_enum(self) -> None:
+        assert issubclass(WidgetCategory, Enum)
+
+    def test_members_count(self) -> None:
+        assert len(WidgetCategory) == 6
 
 
 # =============================================================================

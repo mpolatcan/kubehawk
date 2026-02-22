@@ -92,36 +92,6 @@ class TestReleaseFetcher:
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_fetch_release_values_success(self, mock_run_helm: AsyncMock) -> None:
-        """Test fetch_release_values returns chart values."""
-        fetcher = ReleaseFetcher(run_helm_func=mock_run_helm)
-
-        values_data = {
-            "resources": {
-                "requests": {"cpu": "100m", "memory": "128Mi"},
-                "limits": {"cpu": "500m", "memory": "512Mi"},
-            }
-        }
-        mock_run_helm.return_value = json.dumps(values_data)
-
-        result = await fetcher.fetch_release_values("my-release", "my-namespace")
-
-        assert result is not None
-        assert "resources" in result
-        assert result["resources"]["requests"]["cpu"] == "100m"
-        called_args = mock_run_helm.await_args_list[0].args[0]
-        assert called_args[-2:] == ("-o", "yaml")
-
-    @pytest.mark.asyncio
-    async def test_fetch_release_values_error(self, mock_run_helm: AsyncMock) -> None:
-        """Test fetch_release_values handles errors gracefully."""
-        fetcher = ReleaseFetcher(run_helm_func=mock_run_helm)
-        mock_run_helm.return_value = ""
-
-        result = await fetcher.fetch_release_values("my-release", "my-namespace")
-        assert result == {}
-
-    @pytest.mark.asyncio
     async def test_fetch_release_values_with_output_success(
         self, mock_run_helm: AsyncMock
     ) -> None:

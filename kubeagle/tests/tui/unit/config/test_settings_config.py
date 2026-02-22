@@ -349,9 +349,9 @@ class TestSettingsConfigValidationLimits:
 # =============================================================================
 
 __all__ = [
-    "TestSettingsConfigSections",
     "TestSettingsConfigButtons",
     "TestSettingsConfigPlaceholders",
+    "TestSettingsConfigSections",
     "TestSettingsConfigSettingIDs",
     "TestSettingsConfigValidationLimits",
 ]

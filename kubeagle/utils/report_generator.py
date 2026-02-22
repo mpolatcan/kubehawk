@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -36,6 +36,65 @@ class TUIReportGenerator:
     def __init__(self, data: ReportData):
         self.data = data
         self.lines: list[str] = []
+        self._build_lookup_indexes()
+
+    def _build_lookup_indexes(self) -> None:
+        """Pre-build lookup indexes to avoid O(n^2) filtering patterns.
+
+        Called once at construction time to create:
+        - _team_charts: team name -> list of charts
+        - _chart_names_by_team: team name -> set of chart names
+        - _violations_by_chart: chart name -> list of violations
+        - _team_counts: Counter of charts per team
+        - _qos_counts: Counter of QoS class values
+        """
+        # Team -> charts mapping
+        self._team_charts: dict[str, list[ChartInfo]] = defaultdict(list)
+        self._chart_names_by_team: dict[str, set[str]] = defaultdict(set)
+        for c in self.data.charts:
+            self._team_charts[c.team].append(c)
+            self._chart_names_by_team[c.team].add(c.name)
+
+        # Chart name -> violations mapping
+        self._violations_by_chart: dict[str, list[ViolationResult]] = defaultdict(list)
+        for v in self.data.violations:
+            self._violations_by_chart[v.chart_name].append(v)
+
+        # Pre-computed counters
+        self._team_counts: Counter[str] = Counter(c.team for c in self.data.charts)
+        self._qos_counts: Counter[str] = Counter(
+            c.qos_class.value for c in self.data.charts
+        )
+
+        # Pre-computed violation severity counts
+        self._error_violation_count: int = sum(
+            1 for v in self.data.violations if v.severity == Severity.ERROR
+        )
+        self._warning_violation_count: int = sum(
+            1 for v in self.data.violations if v.severity == Severity.WARNING
+        )
+
+        # Pre-computed chart subsets
+        self._single_replica_charts: list[ChartInfo] = [
+            c for c in self.data.charts if c.replicas is not None and c.replicas == 1
+        ]
+        self._charts_without_pdb: list[ChartInfo] = [
+            c for c in self.data.charts if not c.pdb_enabled
+        ]
+        self._charts_best_effort: list[ChartInfo] = [
+            c for c in self.data.charts if c.qos_class == QoSClass.BEST_EFFORT
+        ]
+        self._charts_with_pdb_count: int = sum(
+            1 for c in self.data.charts if c.pdb_enabled
+        )
+
+    def _team_violation_count(self, team: str) -> int:
+        """Get the number of violations for charts belonging to a team."""
+        chart_names = self._chart_names_by_team.get(team, set())
+        count = 0
+        for name in chart_names:
+            count += len(self._violations_by_chart.get(name, []))
+        return count
 
     def generate_markdown_report(self, report_format: str = "full") -> str:
         """Generate a markdown report in CLI format.
@@ -174,15 +233,12 @@ class TUIReportGenerator:
         single_replica_workloads = len(self.data.single_replica_workloads)
 
         total_charts = len(self.data.charts)
-        charts_with_pdb = sum(1 for c in self.data.charts if c.pdb_enabled)
+        charts_with_pdb = self._charts_with_pdb_count
         pdb_coverage = self._pct(charts_with_pdb, total_charts)
 
-        teams = {c.team for c in self.data.charts}
+        teams = set(self._team_counts)
 
-        single_replica_charts = [
-            c for c in self.data.charts if c.replicas is not None and c.replicas == 1
-        ]
-        single_replica_chart_count = len(single_replica_charts)
+        single_replica_chart_count = len(self._single_replica_charts)
 
         self._add_lines(
             "### EKS Cluster Overview",
@@ -403,25 +459,18 @@ class TUIReportGenerator:
             return
 
         # By Team
-        team_counts = Counter(c.team for c in self.data.charts)
         self._add_lines(
             "### 2.1 By Team",
             "",
             "| Team | Charts | Violations |",
             "| --- | --- | --- |",
         )
-        for team in sorted(team_counts):
-            team_charts = [c for c in self.data.charts if c.team == team]
-            team_violations = sum(
-                1
-                for v in self.data.violations
-                if v.chart_name in [c.name for c in team_charts]
-            )
-            self._add(f"| {team} | {team_counts[team]} | {team_violations} |")
+        for team in sorted(self._team_counts):
+            team_violations = self._team_violation_count(team)
+            self._add(f"| {team} | {self._team_counts[team]} | {team_violations} |")
         self._add()
 
         # QoS Class Distribution
-        qos_counts = Counter(c.qos_class.value for c in self.data.charts)
         self._add_lines(
             "### 2.2 QoS Class Distribution",
             "",
@@ -430,22 +479,19 @@ class TUIReportGenerator:
         )
         total_charts = len(self.data.charts)
         for qos in QoSClass:
-            count = qos_counts.get(qos.value, 0)
+            count = self._qos_counts.get(qos.value, 0)
             pct = self._pct(count, total_charts)
             self._add(f"| {qos.value} | {count} | {pct:.1f}% |")
         self._add()
 
         # Single Replica Charts
-        single_replica_charts = [
-            c for c in self.data.charts if c.replicas is not None and c.replicas == 1
-        ]
         self._add_lines(
             "### 2.3 Single Replica Charts",
             "",
             "| Chart | Team | Replicas |",
             "| --- | --- | --- |",
         )
-        for chart in sorted(single_replica_charts, key=lambda c: c.name):
+        for chart in sorted(self._single_replica_charts, key=lambda c: c.name):
             self._add(f"| {chart.name} | {chart.team} | {chart.replicas} |")
         self._add()
 
@@ -479,25 +525,18 @@ class TUIReportGenerator:
             return
 
         # By Team
-        team_counts = Counter(c.team for c in self.data.charts)
         self._add_lines(
             "### 2.1 By Team",
             "",
             "| Team | Charts | Violations |",
             "| --- | --- | --- |",
         )
-        for team in sorted(team_counts):
-            team_charts = [c for c in self.data.charts if c.team == team]
-            team_violations = sum(
-                1
-                for v in self.data.violations
-                if v.chart_name in [c.name for c in team_charts]
-            )
-            self._add(f"| {team} | {team_counts[team]} | {team_violations} |")
+        for team in sorted(self._team_counts):
+            team_violations = self._team_violation_count(team)
+            self._add(f"| {team} | {self._team_counts[team]} | {team_violations} |")
         self._add()
 
         # QoS Class Distribution
-        qos_counts = Counter(c.qos_class.value for c in self.data.charts)
         self._add_lines(
             "### 2.2 QoS Class Distribution",
             "",
@@ -506,22 +545,19 @@ class TUIReportGenerator:
         )
         total_charts = len(self.data.charts)
         for qos in QoSClass:
-            count = qos_counts.get(qos.value, 0)
+            count = self._qos_counts.get(qos.value, 0)
             pct = self._pct(count, total_charts)
             self._add(f"| {qos.value} | {count} | {pct:.1f}% |")
         self._add()
 
         # Single Replica Charts
-        single_replica_charts = [
-            c for c in self.data.charts if c.replicas is not None and c.replicas == 1
-        ]
         self._add_lines(
             "### 2.3 Single Replica Charts",
             "",
             "| Chart | Team | Replicas | QoS Class |",
             "| --- | --- | --- | --- |",
         )
-        for chart in sorted(single_replica_charts, key=lambda c: c.name):
+        for chart in sorted(self._single_replica_charts, key=lambda c: c.name):
             self._add(
                 f"| {chart.name} | {chart.team} | {chart.replicas} | {chart.qos_class.value} |"
             )
@@ -574,14 +610,8 @@ class TUIReportGenerator:
         )
 
         if self.data.violations:
-            error_count = sum(
-                1 for v in self.data.violations if v.severity == Severity.ERROR
-            )
-            warning_count = sum(
-                1 for v in self.data.violations if v.severity == Severity.WARNING
-            )
-            self._add(f"- Errors: {error_count}")
-            self._add(f"- Warnings: {warning_count}")
+            self._add(f"- Errors: {self._error_violation_count}")
+            self._add(f"- Warnings: {self._warning_violation_count}")
             self._add()
 
         self._add("### Priority Actions")
@@ -630,30 +660,23 @@ class TUIReportGenerator:
         )
 
         # Missing PDBs
-        charts_without_pdb = [c for c in self.data.charts if not c.pdb_enabled]
-        if charts_without_pdb:
+        if self._charts_without_pdb:
             self._add_lines(
-                f"**[WARN] Charts Without PDBs:** {len(charts_without_pdb)} charts",
+                f"**[WARN] Charts Without PDBs:** {len(self._charts_without_pdb)} charts",
                 "",
             )
 
         # Missing Resources
-        charts_missing_resources = [
-            c for c in self.data.charts if c.qos_class == QoSClass.BEST_EFFORT
-        ]
-        if charts_missing_resources:
+        if self._charts_best_effort:
             self._add_lines(
-                f"**[WARN] Missing Resource Definitions:** {len(charts_missing_resources)} charts",
+                f"**[WARN] Missing Resource Definitions:** {len(self._charts_best_effort)} charts",
                 "",
             )
 
         # Single Replica
-        single_replica_charts = [
-            c for c in self.data.charts if c.replicas is not None and c.replicas == 1
-        ]
-        if single_replica_charts:
+        if self._single_replica_charts:
             self._add_lines(
-                f"**[WARN] Single Replica Charts:** {len(single_replica_charts)} charts have no pod redundancy",
+                f"**[WARN] Single Replica Charts:** {len(self._single_replica_charts)} charts have no pod redundancy",
                 "",
                 "For production workloads, consider:",
                 "",
@@ -694,18 +717,10 @@ class TUIReportGenerator:
             "total_charts": len(self.data.charts),
             "total_nodes": len(self.data.nodes),
             "total_violations": len(self.data.violations),
-            "error_violations": sum(
-                1 for v in self.data.violations if v.severity == Severity.ERROR
-            ),
-            "warning_violations": sum(
-                1 for v in self.data.violations if v.severity == Severity.WARNING
-            ),
-            "charts_with_pdb": sum(1 for c in self.data.charts if c.pdb_enabled),
-            "single_replica_charts": sum(
-                1
-                for c in self.data.charts
-                if c.replicas is not None and c.replicas == 1
-            ),
+            "error_violations": self._error_violation_count,
+            "warning_violations": self._warning_violation_count,
+            "charts_with_pdb": self._charts_with_pdb_count,
+            "single_replica_charts": len(self._single_replica_charts),
             "single_replica_workloads": len(self.data.single_replica_workloads),
             "blocking_pdbs": sum(1 for p in self.data.pdbs if p.is_blocking),
         }
@@ -760,13 +775,9 @@ class TUIReportGenerator:
         """Get charts data as dictionary."""
         return {
             "total_charts": len(self.data.charts),
-            "by_team": dict(Counter(c.team for c in self.data.charts)),
-            "by_qos": dict(Counter(c.qos_class.value for c in self.data.charts)),
-            "single_replica_count": sum(
-                1
-                for c in self.data.charts
-                if c.replicas is not None and c.replicas == 1
-            ),
+            "by_team": dict(self._team_counts),
+            "by_qos": dict(self._qos_counts),
+            "single_replica_count": len(self._single_replica_charts),
             "charts": [
                 {
                     "name": c.name,
@@ -816,15 +827,11 @@ class TUIReportGenerator:
             )
 
         # Missing PDBs
-        charts_without_pdb = [c for c in self.data.charts if not c.pdb_enabled]
-        recommendations.extend(f"Enable PDB for {chart.name}" for chart in charts_without_pdb[:5])
+        recommendations.extend(f"Enable PDB for {chart.name}" for chart in self._charts_without_pdb[:5])
 
         # Single replica
-        single_replica_charts = [
-            c for c in self.data.charts if c.replicas is not None and c.replicas == 1
-        ]
         recommendations.extend(
-            f"Consider increasing replicas for {chart.name}" for chart in single_replica_charts[:5]
+            f"Consider increasing replicas for {chart.name}" for chart in self._single_replica_charts[:5]
         )
 
         # Violations

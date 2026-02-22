@@ -461,4 +461,4 @@ class BundleDiffModal(ModalScreen[str | None]):
         return combined or "# No diff content available."
 
 
-__all__ = ["FixDetailsModal", "FixDetailsAction", "BundleDiffModal"]
+__all__ = ["BundleDiffModal", "FixDetailsAction", "FixDetailsModal"]

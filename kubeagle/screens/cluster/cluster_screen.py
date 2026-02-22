@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any, cast
 
 from rich.style import Style
-from rich.text import Text
+from rich.text import Span as _RichSpan, Text
 from textual import on
 from textual.app import ComposeResult
 from textual.color import Gradient
@@ -75,7 +75,12 @@ _POD_STATS_UNITS_SELECT_ID = "pod-stats-units-select"
 _NODE_DISTRIBUTION_UNITS_SELECT_ID = "node-distribution-units-select"
 
 def _apply_gradient_left_to_right(text: Text, gradient: Gradient, width: int) -> None:
-    """Apply gradient left-to-right across the progress bar width."""
+    """Apply gradient left-to-right across the progress bar width.
+
+    Performance: builds all gradient spans in a batch and assigns them
+    directly to the Text._spans list, avoiding per-character stylize()
+    overhead.
+    """
     if not width:
         return
     max_width = width - 1
@@ -84,12 +89,18 @@ def _apply_gradient_left_to_right(text: Text, gradient: Gradient, width: int) ->
         return
 
     text_length = len(text)
-    for offset in range(text_length):
-        text.stylize(
-            Style.from_color(gradient.get_rich_color(offset / max_width)),
-            offset,
-            offset + 1,
-        )
+    if text_length <= 0:
+        return
+
+    # Pre-compute all gradient colors in one pass then batch-assign spans.
+    # This avoids O(n) individual stylize() calls that each scan/merge
+    # the internal spans list.
+    inv_max = 1.0 / max_width
+    spans = [
+        _RichSpan(offset, offset + 1, Style.from_color(gradient.get_rich_color(offset * inv_max)))
+        for offset in range(text_length)
+    ]
+    text._spans.extend(spans)
 
 
 class _ForwardGradientBarRenderable(RichBarRenderable):
@@ -171,7 +182,6 @@ class _ColumnFilterSelectionModal(ModalScreen[set[str] | None]):
 
     BINDINGS = [("escape", "cancel", "Cancel")]
     _DIALOG_MIN_WIDTH = 44
-    _DIALOG_MAX_WIDTH = 180
     _DIALOG_MIN_HEIGHT = 14
     _DIALOG_MAX_HEIGHT = 30
     _VISIBLE_ROWS_MIN = 4
@@ -193,6 +203,7 @@ class _ColumnFilterSelectionModal(ModalScreen[set[str] | None]):
         self._selected_values = {value for value in selected_values if value in self._all_values}
         self._search_query = ""
         self._visible_option_values: set[str] = set()
+        self._search_debounce_timer: Timer | None = None
 
     def compose(self) -> ComposeResult:
         with CustomContainer(
@@ -265,7 +276,11 @@ class _ColumnFilterSelectionModal(ModalScreen[set[str] | None]):
             search_input.input.focus()
 
     def on_resize(self, _: Resize) -> None:
-        self._apply_dynamic_layout()
+        if hasattr(self, "_resize_timer") and self._resize_timer is not None:
+            self._resize_timer.stop()
+        self._resize_timer: Timer | None = self.set_timer(
+            0.1, self._apply_dynamic_layout
+        )
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -274,6 +289,14 @@ class _ColumnFilterSelectionModal(ModalScreen[set[str] | None]):
         if event.input.id != "cluster-filter-modal-search":
             return
         self._search_query = event.value.strip().lower()
+        if self._search_debounce_timer is not None:
+            self._search_debounce_timer.stop()
+        self._search_debounce_timer = self.set_timer(
+            0.15, self._debounced_refresh_options
+        )
+
+    def _debounced_refresh_options(self) -> None:
+        self._search_debounce_timer = None
         self._refresh_selection_options()
 
     def on_selection_list_selected_changed(
@@ -565,7 +588,11 @@ class _ClusterFiltersModal(ModalScreen[dict[str, set[str]] | None]):
                 ).focus()
 
     def on_resize(self, _: Resize) -> None:
-        self._apply_dynamic_layout()
+        if hasattr(self, "_resize_timer") and self._resize_timer is not None:
+            self._resize_timer.stop()
+        self._resize_timer: Timer | None = self.set_timer(
+            0.1, self._apply_dynamic_layout
+        )
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -1044,33 +1071,6 @@ class ClusterScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scree
         ("Asc", "asc"),
         ("Desc", "desc"),
     )
-    _FILTER_PLACEHOLDER_OPTIONS: tuple[tuple[str, str], ...] = (
-        ("Cond: All", "all"),
-    )
-    _WARNING_TOKENS: tuple[str, ...] = (
-        "warn",
-        "warning",
-        "critical",
-        "error",
-        "notready",
-        "unhealthy",
-        "blocking",
-        "oom",
-        "failed",
-    )
-    _ERROR_TOKENS: tuple[str, ...] = (
-        "error",
-        "critical",
-        "failed",
-        "notready",
-        "unhealthy",
-        "blocking",
-    )
-    _BLOCKING_TOKENS: tuple[str, ...] = (
-        "block",
-        "disruption",
-        "cannot",
-    )
     _POD_STATS_UNIT_MODE_MILLI = "m_mi"
     _POD_STATS_UNIT_MODE_CORE_GB = "core_gb"
     _POD_STATS_UNIT_OPTIONS: tuple[tuple[str, str], ...] = (
@@ -1083,15 +1083,6 @@ class ClusterScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scree
         ("Units: m/Gi", _NODE_DISTRIBUTION_UNIT_MODE_MILLI_GI),
         ("Units: core/GB", _NODE_DISTRIBUTION_UNIT_MODE_CORE_GB),
     )
-    _NOT_READY_TOKENS: tuple[str, ...] = (
-        "notready",
-        "not ready",
-        "unknown",
-        "unhealthy",
-        "false",
-        "degraded",
-    )
-
     CSS_PATH = "../../css/screens/cluster_screen.tcss"
 
     def __init__(self, context: str | None = None) -> None:
@@ -1113,6 +1104,7 @@ class ClusterScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scree
         self._data_loaded: bool = False
         self._search_timer: object | None = None
         self._syncing_search_inputs: bool = False
+        self._cached_search_inputs: dict[str, Any] = {}
         self._resize_debounce_timer: Timer | None = None
         self._source_refresh_timer: Timer | None = None
         self._status_refresh_timer: Timer | None = None
@@ -2223,13 +2215,11 @@ class ClusterScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scree
         self._cancel_debounce_timers()
         if self._presenter.is_loading:
             if not self._data_loaded:
-                # During cold-start loads, prefer responsive navigation over
-                # background fetch progress. Resume will reload when needed.
-                with suppress(Exception):
-                    self.workers.cancel_all()
-                self._reload_data_on_resume = True
-                self._refresh_on_resume = False
-                self._status_on_resume = False
+                # Keep workers alive — they'll deliver results via message.
+                # On resume, if data arrived while away, just render it.
+                self._reload_data_on_resume = False
+                self._refresh_on_resume = True
+                self._status_on_resume = True
                 return
             # Once data has started streaming, keep load alive to avoid
             # expensive cancel/restart thrash when users bounce between screens.
@@ -2646,8 +2636,19 @@ class ClusterScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scree
                 input_id = self._control_id(tab_id, "search-input")
                 if source_input_id and input_id == source_input_id:
                     continue
+                # Use cached widget ref to avoid DOM query per tab
+                cached = self._cached_search_inputs.get(input_id)
+                if cached is not None:
+                    try:
+                        if cached.value != self.search_query:
+                            cached.value = self.search_query
+                        continue
+                    except Exception:
+                        # Widget removed or invalid — fall through to re-query
+                        self._cached_search_inputs.pop(input_id, None)
                 with suppress(Exception):
                     input_widget = self.query_one(f"#{input_id}", CustomInput)
+                    self._cached_search_inputs[input_id] = input_widget
                     if input_widget.value != self.search_query:
                         input_widget.value = self.search_query
         finally:
@@ -2824,9 +2825,11 @@ class ClusterScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scree
         """Advance visible loading percent while partial sources stream in."""
         if not self._presenter.is_loading:
             return
-        tracked_source_keys = set(self._build_reverse_map())
-        if not tracked_source_keys:
+        reverse_map = self._build_reverse_map()
+        if not reverse_map:
             return
+        # Use dict keys view directly for set operations (avoids copy)
+        tracked_source_keys = reverse_map.keys()
         loaded_count = len(self._presenter.loaded_keys & tracked_source_keys)
         seen_count = len(self._progress_seen_source_keys & tracked_source_keys)
         resolved_count = max(loaded_count, seen_count)
@@ -3167,12 +3170,25 @@ class ClusterScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scree
     def _build_tab_string_filter_options(
         self, table_data: list[tuple[list[tuple[str, int]], list[tuple]]]
     ) -> dict[str, tuple[str, tuple[tuple[str, str], ...]]]:
-        """Build per-column, string-only filter options from tab datasets."""
+        """Build per-column, string-only filter options from tab datasets.
+
+        Performance: pre-computes filterable column indices per table,
+        uses local references for regex patterns, and breaks early when
+        a column is both truncated and full.
+        """
         column_labels: dict[str, str] = {}
         column_values: dict[str, dict[str, str]] = {}
         truncated_columns: set[str] = set()
 
+        # Local refs to avoid repeated attribute lookups in tight inner loop
+        _normalize = self._normalize_cell_text
+        _is_numeric = self._is_numeric_like_text
+        _has_alpha = self._HAS_ALPHA_RE.search
+        _max_values = self._MAX_FILTER_VALUES_PER_COLUMN
+
         for columns, rows in table_data:
+            # Pre-compute filterable columns for this table
+            filterable: list[tuple[int, str, str]] = []
             for column_index, (column_name, _) in enumerate(columns):
                 if not self._is_filterable_string_column(column_name):
                     continue
@@ -3180,25 +3196,28 @@ class ClusterScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scree
                 if not column_slug:
                     continue
                 column_labels.setdefault(column_slug, column_name)
-                values_for_column = column_values.setdefault(column_slug, {})
-                for row in rows:
-                    if column_index >= len(row):
+                column_values.setdefault(column_slug, {})
+                filterable.append((column_index, column_slug, column_name))
+
+            if not filterable:
+                continue
+
+            for row in rows:
+                row_len = len(row)
+                for column_index, column_slug, _ in filterable:
+                    if column_index >= row_len:
                         continue
-                    text = self._normalize_cell_text(row[column_index])
-                    if (
-                        not text
-                        or self._is_numeric_like_text(text)
-                        or not self._HAS_ALPHA_RE.search(text)
-                    ):
+                    text = _normalize(row[column_index])
+                    if not text or not _has_alpha(text) or _is_numeric(text):
                         continue
                     normalized = text.lower()
-                    if (
-                        normalized not in values_for_column
-                        and len(values_for_column) >= self._MAX_FILTER_VALUES_PER_COLUMN
-                    ):
+                    values_for_column = column_values[column_slug]
+                    if normalized in values_for_column:
+                        continue
+                    if len(values_for_column) >= _max_values:
                         truncated_columns.add(column_slug)
                         continue
-                    values_for_column.setdefault(normalized, text)
+                    values_for_column[normalized] = text
 
         options_by_column: dict[str, tuple[str, tuple[tuple[str, str], ...]]] = {}
         for column_slug, column_name in column_labels.items():
@@ -3602,10 +3621,27 @@ class ClusterScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scree
 
     @classmethod
     def _rows_signature(cls, rows: list[tuple]) -> int:
-        """Build a bounded signature for a rendered table payload."""
-        signature = cls._mix_table_signature(0, len(rows))
-        for row in rows:
-            signature = cls._mix_table_signature(signature, hash(row))
+        """Build a bounded signature for a rendered table payload.
+
+        Performance: for large tables (>500 rows), samples first, last, and
+        evenly-spaced middle rows instead of hashing every row. This reduces
+        O(n) to O(1) while still detecting most data changes.
+        """
+        row_count = len(rows)
+        signature = cls._mix_table_signature(0, row_count)
+        _SAMPLE_THRESHOLD = 500
+        if row_count <= _SAMPLE_THRESHOLD:
+            for row in rows:
+                signature = cls._mix_table_signature(signature, hash(row))
+        else:
+            # Sample ~64 evenly spaced rows + first 8 + last 8
+            step = max(1, row_count // 64)
+            sample_indices = set(range(0, 8))
+            sample_indices.update(range(row_count - 8, row_count))
+            sample_indices.update(range(0, row_count, step))
+            for idx in sorted(sample_indices):
+                if 0 <= idx < row_count:
+                    signature = cls._mix_table_signature(signature, hash(rows[idx]))
         return signature
 
     def _column_key_from_label(self, label: str, index: int) -> str:
@@ -3665,8 +3701,10 @@ class ClusterScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scree
                         table.add_rows(controlled_rows)
                 restored_row_index: int | None = None
                 if previous_selected_row_data is not None:
-                    with suppress(ValueError):
-                        restored_row_index = controlled_rows.index(previous_selected_row_data)
+                    _row_index_map = {
+                        row: idx for idx, row in enumerate(controlled_rows)
+                    }
+                    restored_row_index = _row_index_map.get(previous_selected_row_data)
                 if (
                     restored_row_index is None
                     and isinstance(previous_selected_row, int)
@@ -4366,7 +4404,7 @@ class ClusterScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scree
     def _format_capacity_value(value: float, decimals: int) -> str:
         """Format capacity number with fixed precision and trimmed trailing zeros."""
         if decimals <= 0:
-            return str(int(round(value)))
+            return str(round(value))
         value_text = f"{value:.{decimals}f}".rstrip("0").rstrip(".")
         return value_text or "0"
 
@@ -4702,7 +4740,8 @@ class ClusterScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scree
         with suppress(Exception):
             self.query_one("#cluster-inner-switcher", ContentSwitcher).current = target_tab
         if self._data_loaded and target_tab not in self._populated_tabs:
-            self._refresh_tab(target_tab)
+            # Defer table rebuild so the tab switch renders immediately
+            self.call_later(self._refresh_tab, target_tab)
 
     def _get_active_tab_id(self) -> str:
         """Get the currently active tab ID."""

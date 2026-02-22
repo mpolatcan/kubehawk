@@ -65,9 +65,7 @@ class WorkloadInventoryInfo(BaseModel):
     ready_replicas: int | None
     status: str
     helm_release: str | None = None
-    managed_by_helm: bool = False
     has_pdb: bool = False
-    is_system_workload: bool = False
     cpu_request: float = 0.0
     cpu_limit: float = 0.0
     memory_request: float = 0.0
@@ -88,8 +86,6 @@ class WorkloadInventoryInfo(BaseModel):
     pod_count: int = 0
     restart_count: int = 0
     restart_reason_counts: dict[str, int] = Field(default_factory=dict)
-    aggressive_pod_outlier: bool = False
-    aggressive_pod_ratio: float | None = None
     node_real_cpu_avg: str = "-"
     node_real_cpu_max: str = "-"
     node_real_cpu_p95: str = "-"
@@ -102,17 +98,5 @@ class WorkloadInventoryInfo(BaseModel):
     pod_real_memory_avg: str = "-"
     pod_real_memory_max: str = "-"
     pod_real_memory_p95: str = "-"
-    neighbor_cpu_pressure_max: str = "-"
-    neighbor_cpu_pressure_avg: str = "-"
-    neighbor_mem_pressure_max: str = "-"
-    neighbor_mem_pressure_avg: str = "-"
-    neighbor_cpu_req_pressure_max: str = "-"
-    neighbor_cpu_req_pressure_avg: str = "-"
-    neighbor_cpu_lim_pressure_max: str = "-"
-    neighbor_cpu_lim_pressure_avg: str = "-"
-    neighbor_mem_req_pressure_max: str = "-"
-    neighbor_mem_req_pressure_avg: str = "-"
-    neighbor_mem_lim_pressure_max: str = "-"
-    neighbor_mem_lim_pressure_avg: str = "-"
     assigned_node_details: list[WorkloadAssignedNodeDetailInfo] = Field(default_factory=list)
     assigned_pod_details: list[WorkloadAssignedPodDetailInfo] = Field(default_factory=list)

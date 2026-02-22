@@ -301,13 +301,13 @@ class TestSettingsScreenSaveCancel:
 # =============================================================================
 
 __all__ = [
-    "TestSettingsScreenWidgetComposition",
-    "TestSettingsScreenKeybindings",
-    "TestSettingsScreenSettingsManagement",
-    "TestSettingsScreenStatusAndLoading",
     "TestSettingsScreenButtonHandlers",
-    "TestSettingsScreenNavigation",
     "TestSettingsScreenHelpAndRefresh",
+    "TestSettingsScreenKeybindings",
+    "TestSettingsScreenNavigation",
     "TestSettingsScreenProperties",
     "TestSettingsScreenSaveCancel",
+    "TestSettingsScreenSettingsManagement",
+    "TestSettingsScreenStatusAndLoading",
+    "TestSettingsScreenWidgetComposition",
 ]

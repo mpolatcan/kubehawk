@@ -13,7 +13,7 @@ from kubeagle.widgets.tabs.custom_tabs import CustomTab, CustomTabs
 
 __all__ = [
     "CustomTab",
-    "CustomTabs",
-    "CustomTabbedContent",
     "CustomTabPane",
+    "CustomTabbedContent",
+    "CustomTabs",
 ]

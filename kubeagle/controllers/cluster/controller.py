@@ -14,6 +14,7 @@ import math
 import os
 import subprocess
 import time
+from collections import OrderedDict
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
@@ -66,16 +67,6 @@ class FetchStatus:
     error_message: str | None = None
     last_updated: datetime | None = None
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for serialization."""
-        return {
-            "source_name": self.source_name,
-            "state": self.state.value,
-            "error_message": self.error_message,
-            "last_updated": self.last_updated.isoformat()
-            if self.last_updated
-            else None,
-        }
 
 
 class ClusterController(BaseController):
@@ -100,7 +91,7 @@ class ClusterController(BaseController):
     _DEFAULT_EVENT_WINDOW_HOURS = 0.25  # 15 minutes
     _WARNING_EVENTS_REQUEST_TIMEOUT = CLUSTER_REQUEST_TIMEOUT
     _NAMESPACE_STREAM_MAX_CONCURRENT = 4
-    _GLOBAL_COMMAND_CACHE_TTL_SECONDS = 20.0
+    _GLOBAL_COMMAND_CACHE_TTL_SECONDS = 120.0
     _PARTIAL_UPDATE_TARGET_EMITS = 4
     _PDB_NAMESPACE_RETRY_ATTEMPTS = 1
     _SEMAPHORE_ACQUIRE_TIMEOUT = 60.0  # Prevent indefinite blocking on hung fetches
@@ -115,9 +106,9 @@ class ClusterController(BaseController):
 
     _fetch_semaphore: asyncio.Semaphore | None = None
     _semaphore_max_concurrent: int = 3
-    _global_kubectl_cache: dict[tuple[str, tuple[str, ...]], tuple[float, str]] = {}
-    _global_helm_cache: dict[tuple[str, tuple[str, ...]], tuple[float, str]] = {}
-    _GLOBAL_COMMAND_CACHE_MAX_ENTRIES = 64  # Prevent unbounded memory growth
+    _global_kubectl_cache: OrderedDict[tuple[str, tuple[str, ...]], tuple[float, str]] = OrderedDict()
+    _global_helm_cache: OrderedDict[tuple[str, tuple[str, ...]], tuple[float, str]] = OrderedDict()
+    _GLOBAL_COMMAND_CACHE_MAX_ENTRIES = 256  # Generous limit — avoids evicting useful entries
 
     @classmethod
     def get_semaphore(cls, max_concurrent: int | None = None) -> asyncio.Semaphore:
@@ -187,20 +178,25 @@ class ClusterController(BaseController):
             return
 
         context_key = context or ""
-        cls._global_kubectl_cache = {
-            key: value
+        cls._global_kubectl_cache = OrderedDict(
+            (key, value)
             for key, value in cls._global_kubectl_cache.items()
             if key[0] != context_key
-        }
-        cls._global_helm_cache = {
-            key: value
+        )
+        cls._global_helm_cache = OrderedDict(
+            (key, value)
             for key, value in cls._global_helm_cache.items()
             if key[0] != context_key
-        }
+        )
 
     @staticmethod
     def resolve_current_context(timeout_seconds: int = 8) -> str | None:
-        """Resolve active kubectl context name from local kubeconfig."""
+        """Resolve active kubectl context name from local kubeconfig.
+
+        This method performs a blocking subprocess call. Call from a worker
+        thread or wrap with ``asyncio.to_thread`` to avoid blocking the
+        event loop.
+        """
         try:
             result = subprocess.run(
                 ["kubectl", "config", "current-context"],
@@ -215,6 +211,11 @@ class ClusterController(BaseController):
             return None
         resolved = (result.stdout or "").strip()
         return resolved or None
+
+    @classmethod
+    async def resolve_current_context_async(cls, timeout_seconds: int = 8) -> str | None:
+        """Async wrapper for :meth:`resolve_current_context`."""
+        return await asyncio.to_thread(cls.resolve_current_context, timeout_seconds)
 
     @classmethod
     def _should_emit_partial_update(cls, completed: int, total: int) -> bool:
@@ -445,6 +446,7 @@ class ClusterController(BaseController):
         if global_cached is not None:
             cached_at, cached_output = global_cached
             if time.monotonic() - cached_at <= self._GLOBAL_COMMAND_CACHE_TTL_SECONDS:
+                self._global_kubectl_cache.move_to_end(global_key)
                 return cached_output
             self._global_kubectl_cache.pop(global_key, None)
 
@@ -461,13 +463,9 @@ class ClusterController(BaseController):
             result = await task
             self._kubectl_cache[args] = result
             self._global_kubectl_cache[global_key] = (time.monotonic(), result)
-            # Evict oldest entries when cache exceeds max size
-            if len(self._global_kubectl_cache) > self._GLOBAL_COMMAND_CACHE_MAX_ENTRIES:
-                oldest_key = min(
-                    self._global_kubectl_cache,
-                    key=lambda k: self._global_kubectl_cache[k][0],
-                )
-                self._global_kubectl_cache.pop(oldest_key, None)
+            # Evict least-recently-used entry when cache exceeds max size
+            while len(self._global_kubectl_cache) > self._GLOBAL_COMMAND_CACHE_MAX_ENTRIES:
+                self._global_kubectl_cache.popitem(last=False)
             return result
         finally:
             if self._kubectl_tasks.get(args) is task:
@@ -481,6 +479,7 @@ class ClusterController(BaseController):
         if global_cached is not None:
             cached_at, cached_output = global_cached
             if time.monotonic() - cached_at <= self._GLOBAL_COMMAND_CACHE_TTL_SECONDS:
+                self._global_helm_cache.move_to_end(global_key)
                 return cached_output
             self._global_helm_cache.pop(global_key, None)
 
@@ -497,13 +496,9 @@ class ClusterController(BaseController):
             result = await task
             self._helm_cache[args] = result
             self._global_helm_cache[global_key] = (time.monotonic(), result)
-            # Evict oldest entries when cache exceeds max size
-            if len(self._global_helm_cache) > self._GLOBAL_COMMAND_CACHE_MAX_ENTRIES:
-                oldest_key = min(
-                    self._global_helm_cache,
-                    key=lambda k: self._global_helm_cache[k][0],
-                )
-                self._global_helm_cache.pop(oldest_key, None)
+            # Evict least-recently-used entry when cache exceeds max size
+            while len(self._global_helm_cache) > self._GLOBAL_COMMAND_CACHE_MAX_ENTRIES:
+                self._global_helm_cache.popitem(last=False)
             return result
         finally:
             if self._helm_tasks.get(args) is task:
@@ -1484,9 +1479,7 @@ class ClusterController(BaseController):
             ready_replicas=ready_replicas,
             status=status_text,
             helm_release=helm_release,
-            managed_by_helm=helm_release is not None,
             has_pdb=has_pdb,
-            is_system_workload=namespace in cls._SYSTEM_NAMESPACES,
             cpu_request=cpu_request,
             cpu_limit=cpu_limit,
             memory_request=memory_request,
@@ -1838,16 +1831,6 @@ class ClusterController(BaseController):
         )
 
     @staticmethod
-    def _neighbor_pressure_pct(
-        node_total_pct: float | None,
-        workload_pct: float | None,
-    ) -> float | None:
-        """Return node pressure attributable to other workloads on the same node."""
-        if node_total_pct is None or workload_pct is None:
-            return None
-        return max(0.0, node_total_pct - workload_pct)
-
-    @staticmethod
     def _format_assigned_nodes(node_names: set[str]) -> str:
         """Render assigned node count."""
         if not node_names:
@@ -2181,30 +2164,6 @@ class ClusterController(BaseController):
             sample.workload_memory_bytes = sum(pod_memory_values)
         return sample
 
-    @classmethod
-    def _apply_aggressive_pod_markers(
-        cls,
-        rows: list[WorkloadInventoryInfo],
-    ) -> None:
-        """Mark workloads whose pod count exceeds cluster workload pod-count p95."""
-        pod_counts = [float(row.pod_count) for row in rows if int(row.pod_count) > 0]
-        if not pod_counts:
-            for row in rows:
-                row.aggressive_pod_outlier = False
-                row.aggressive_pod_ratio = None
-            return
-
-        threshold = cls._p95_value(pod_counts)
-        if threshold <= 0:
-            for row in rows:
-                row.aggressive_pod_outlier = False
-                row.aggressive_pod_ratio = None
-            return
-
-        for row in rows:
-            row.aggressive_pod_ratio = float(row.pod_count) / threshold
-            row.aggressive_pod_outlier = float(row.pod_count) > threshold
-
     async def _build_node_utilization_lookup_for_pods(
         self,
         pods: list[dict[str, Any]],
@@ -2398,12 +2357,6 @@ class ClusterController(BaseController):
             node_real_memory_values: list[float] = []
             node_real_cpu_pct_values: list[float] = []
             node_real_memory_pct_values: list[float] = []
-            neighbor_cpu_pressure_values: list[float] = []
-            neighbor_memory_pressure_values: list[float] = []
-            neighbor_cpu_req_pressure_values: list[float] = []
-            neighbor_cpu_lim_pressure_values: list[float] = []
-            neighbor_memory_req_pressure_values: list[float] = []
-            neighbor_memory_lim_pressure_values: list[float] = []
             pod_real_cpu_values = [
                 float(detail.pod_real_cpu_mcores)
                 for detail in pod_details
@@ -2424,31 +2377,6 @@ class ClusterController(BaseController):
                 for detail in pod_details
                 if detail.pod_memory_pct_of_node_allocatable is not None
             ]
-            workload_resource_totals_by_node: dict[str, dict[str, float]] = {}
-            for pod in row_pods:
-                pod_status = pod.get("status", {})
-                if pod_status.get("phase") not in ("Running", "Pending"):
-                    continue
-                pod_node_name = str(pod.get("spec", {}).get("nodeName", "") or "").strip()
-                if not pod_node_name:
-                    continue
-                node_totals = workload_resource_totals_by_node.setdefault(
-                    pod_node_name,
-                    {
-                        "cpu_req": 0.0,
-                        "cpu_lim": 0.0,
-                        "mem_req": 0.0,
-                        "mem_lim": 0.0,
-                    },
-                )
-                pod_cpu_req, pod_cpu_lim, pod_mem_req, pod_mem_lim = self._effective_pod_resources(
-                    pod
-                )
-                node_totals["cpu_req"] = float(node_totals["cpu_req"]) + pod_cpu_req
-                node_totals["cpu_lim"] = float(node_totals["cpu_lim"]) + pod_cpu_lim
-                node_totals["mem_req"] = float(node_totals["mem_req"]) + pod_mem_req
-                node_totals["mem_lim"] = float(node_totals["mem_lim"]) + pod_mem_lim
-
             node_details: list[WorkloadAssignedNodeDetailInfo] = []
             for node_name in assigned_node_names:
                 node_utilization = node_utilization_by_name.get(node_name)
@@ -2554,64 +2482,6 @@ class ClusterController(BaseController):
                     )
                     else None
                 )
-                workload_node_totals = workload_resource_totals_by_node.get(node_name)
-                workload_cpu_req_pct = (
-                    (float(workload_node_totals["cpu_req"]) / node_cpu_allocatable * 100.0)
-                    if (workload_node_totals is not None and node_cpu_allocatable > 0)
-                    else None
-                )
-                workload_cpu_lim_pct = (
-                    (float(workload_node_totals["cpu_lim"]) / node_cpu_allocatable * 100.0)
-                    if (workload_node_totals is not None and node_cpu_allocatable > 0)
-                    else None
-                )
-                workload_memory_req_pct = (
-                    (float(workload_node_totals["mem_req"]) / node_memory_allocatable * 100.0)
-                    if (workload_node_totals is not None and node_memory_allocatable > 0)
-                    else None
-                )
-                workload_memory_lim_pct = (
-                    (float(workload_node_totals["mem_lim"]) / node_memory_allocatable * 100.0)
-                    if (workload_node_totals is not None and node_memory_allocatable > 0)
-                    else None
-                )
-                neighbor_cpu_pressure = self._neighbor_pressure_pct(
-                    node_real_cpu_pct,
-                    workload_pod_real_cpu_pct,
-                )
-                neighbor_memory_pressure = self._neighbor_pressure_pct(
-                    node_real_memory_pct,
-                    workload_pod_real_memory_pct,
-                )
-                neighbor_cpu_req_pressure = self._neighbor_pressure_pct(
-                    cpu_req_pct,
-                    workload_cpu_req_pct,
-                )
-                neighbor_cpu_lim_pressure = self._neighbor_pressure_pct(
-                    cpu_lim_pct,
-                    workload_cpu_lim_pct,
-                )
-                neighbor_memory_req_pressure = self._neighbor_pressure_pct(
-                    mem_req_pct,
-                    workload_memory_req_pct,
-                )
-                neighbor_memory_lim_pressure = self._neighbor_pressure_pct(
-                    mem_lim_pct,
-                    workload_memory_lim_pct,
-                )
-                if neighbor_cpu_pressure is not None:
-                    neighbor_cpu_pressure_values.append(neighbor_cpu_pressure)
-                if neighbor_memory_pressure is not None:
-                    neighbor_memory_pressure_values.append(neighbor_memory_pressure)
-                if neighbor_cpu_req_pressure is not None:
-                    neighbor_cpu_req_pressure_values.append(neighbor_cpu_req_pressure)
-                if neighbor_cpu_lim_pressure is not None:
-                    neighbor_cpu_lim_pressure_values.append(neighbor_cpu_lim_pressure)
-                if neighbor_memory_req_pressure is not None:
-                    neighbor_memory_req_pressure_values.append(neighbor_memory_req_pressure)
-                if neighbor_memory_lim_pressure is not None:
-                    neighbor_memory_lim_pressure_values.append(neighbor_memory_lim_pressure)
-
                 node_details.append(
                     WorkloadAssignedNodeDetailInfo(
                         node_name=node_name,
@@ -2758,38 +2628,6 @@ class ClusterController(BaseController):
                 ),
             )
 
-            (
-                row.neighbor_cpu_pressure_max,
-                row.neighbor_cpu_pressure_avg,
-                _neighbor_cpu_p95,
-            ) = self._format_util_stats(neighbor_cpu_pressure_values)
-            (
-                row.neighbor_mem_pressure_max,
-                row.neighbor_mem_pressure_avg,
-                _neighbor_mem_p95,
-            ) = self._format_util_stats(neighbor_memory_pressure_values)
-            (
-                row.neighbor_cpu_req_pressure_max,
-                row.neighbor_cpu_req_pressure_avg,
-                _neighbor_cpu_req_p95,
-            ) = self._format_util_stats(neighbor_cpu_req_pressure_values)
-            (
-                row.neighbor_cpu_lim_pressure_max,
-                row.neighbor_cpu_lim_pressure_avg,
-                _neighbor_cpu_lim_p95,
-            ) = self._format_util_stats(neighbor_cpu_lim_pressure_values)
-            (
-                row.neighbor_mem_req_pressure_max,
-                row.neighbor_mem_req_pressure_avg,
-                _neighbor_mem_req_p95,
-            ) = self._format_util_stats(neighbor_memory_req_pressure_values)
-            (
-                row.neighbor_mem_lim_pressure_max,
-                row.neighbor_mem_lim_pressure_avg,
-                _neighbor_mem_lim_p95,
-            ) = self._format_util_stats(neighbor_memory_lim_pressure_values)
-
-        self._apply_aggressive_pod_markers(rows)
 
     async def _prefetch_workload_runtime_stats_inputs(
         self,
@@ -3380,48 +3218,6 @@ class ClusterController(BaseController):
             resources.append(info)
         return resources
 
-    async def get_node_conditions_summary(self) -> dict[str, dict[str, int]]:
-        """Analyze node conditions across all nodes."""
-        nodes = await self.fetch_nodes(include_pod_resources=False)
-        condition_types = [
-            "Ready",
-            "MemoryPressure",
-            "DiskPressure",
-            "PIDPressure",
-            "NetworkUnavailable",
-        ]
-        conditions: dict[str, dict[str, int]] = {
-            cond: {"True": 0, "False": 0, "Unknown": 0} for cond in condition_types
-        }
-        for node in nodes:
-            for cond_type, status in node.conditions.items():
-                if cond_type in conditions:
-                    if status in conditions[cond_type]:
-                        conditions[cond_type][status] += 1
-                    else:
-                        conditions[cond_type]["Unknown"] += 1
-        return conditions
-
-    async def get_node_taints_analysis(self) -> dict[str, Any]:
-        """Analyze taints distribution across nodes."""
-        nodes = await self.fetch_nodes(include_pod_resources=False)
-        nodes_with_taints = 0
-        taint_distribution: dict[str, dict[str, Any]] = {}
-        for node in nodes:
-            if node.taints:
-                nodes_with_taints += 1
-            for taint in node.taints:
-                key = taint.get("key", "")
-                effect = taint.get("effect", "Unknown")
-                taint_key = f"{key}={taint.get('value', '')}" if key else effect
-                if taint_key not in taint_distribution:
-                    taint_distribution[taint_key] = {"effect": effect, "count": 0}
-                taint_distribution[taint_key]["count"] += 1
-        return {
-            "total_nodes_with_taints": nodes_with_taints,
-            "taint_distribution": taint_distribution,
-        }
-
     async def get_kubelet_version_distribution(self) -> dict[str, int]:
         """Count nodes by kubelet version."""
         nodes = await self.fetch_nodes(include_pod_resources=False)
@@ -3461,57 +3257,6 @@ class ClusterController(BaseController):
                 matrix[ng] = {}
             matrix[ng][az] = matrix[ng].get(az, 0) + 1
         return matrix
-
-    async def get_allocated_analysis(
-        self, include_pod_resources: bool = True
-    ) -> dict[str, Any]:
-        """Calculate CPU/Memory allocation percentages per node group.
-
-        Args:
-            include_pod_resources: When False, performs a fast inventory-only
-                analysis (group counts and allocatable capacity without pod-derived
-                request/limit enrichment).
-        """
-        nodes = await self.fetch_nodes(include_pod_resources=include_pod_resources)
-        node_groups: dict[str, dict[str, Any]] = {}
-        for node in nodes:
-            ng = node.node_group
-            if ng not in node_groups:
-                node_groups[ng] = {
-                    "cpu_allocatable": 0.0,
-                    "memory_allocatable": 0.0,
-                    "cpu_requests": 0.0,
-                    "memory_requests": 0.0,
-                    "node_count": 0,
-                }
-            node_groups[ng]["cpu_allocatable"] += node.cpu_allocatable
-            node_groups[ng]["memory_allocatable"] += node.memory_allocatable
-            node_groups[ng]["cpu_requests"] += node.cpu_requests
-            node_groups[ng]["memory_requests"] += node.memory_requests
-            node_groups[ng]["node_count"] += 1
-
-        result: dict[str, dict[str, Any]] = {}
-        for ng, totals in node_groups.items():
-            cpu_pct = (
-                (totals["cpu_requests"] / totals["cpu_allocatable"] * 100)
-                if totals["cpu_allocatable"] > 0
-                else 0.0
-            )
-            mem_pct = (
-                (totals["memory_requests"] / totals["memory_allocatable"] * 100)
-                if totals["memory_allocatable"] > 0
-                else 0.0
-            )
-            result[ng] = {
-                "cpu_allocatable": totals["cpu_allocatable"],
-                "memory_allocatable": totals["memory_allocatable"],
-                "cpu_requests": totals["cpu_requests"],
-                "memory_requests": totals["memory_requests"],
-                "cpu_pct": cpu_pct,
-                "memory_pct": mem_pct,
-                "node_count": totals["node_count"],
-            }
-        return result
 
     async def get_high_pod_count_nodes(
         self, threshold_pct: float = 80.0
@@ -3811,7 +3556,6 @@ class ClusterController(BaseController):
                             top_node_usage_by_name=top_node_usage_by_name,
                             top_pod_usage_by_key=top_pod_usage_by_key,
                         )
-                        self._apply_aggressive_pod_markers(partial_rows)
                         runtime_metrics_updated = True
 
                 # Emit first namespace callback immediately so UI tables can start

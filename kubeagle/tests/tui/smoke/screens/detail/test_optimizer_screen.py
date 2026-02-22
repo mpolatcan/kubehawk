@@ -616,14 +616,14 @@ class TestOptimizerScreenWorkerMixin:
 # =============================================================================
 
 __all__ = [
-    "TestOptimizerScreenWidgetComposition",
+    "TestOptimizerScreenActionMethods",
     "TestOptimizerScreenCompose",
     "TestOptimizerScreenKeybindings",
     "TestOptimizerScreenLoadingStates",
     "TestOptimizerScreenMessageHandlers",
-    "TestOptimizerScreenViewSwitching",
-    "TestOptimizerScreenActionMethods",
     "TestOptimizerScreenNavigationActions",
     "TestOptimizerScreenRemovedFeatures",
+    "TestOptimizerScreenViewSwitching",
+    "TestOptimizerScreenWidgetComposition",
     "TestOptimizerScreenWorkerMixin",
 ]

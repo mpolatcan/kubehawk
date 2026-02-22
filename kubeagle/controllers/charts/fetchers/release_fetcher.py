@@ -45,21 +45,6 @@ class ReleaseFetcher:
             logger.exception("Error fetching Helm releases")
             return []
 
-    async def fetch_release_values(
-        self, release: str, namespace: str
-    ) -> dict[str, Any]:
-        """Fetch live values for a specific Helm release.
-
-        Args:
-            release: Release name
-            namespace: Release namespace
-
-        Returns:
-            Dictionary of release values.
-        """
-        values, _ = await self.fetch_release_values_with_output(release, namespace)
-        return values
-
     async def fetch_release_values_with_output(
         self, release: str, namespace: str
     ) -> tuple[dict[str, Any], str | None]:

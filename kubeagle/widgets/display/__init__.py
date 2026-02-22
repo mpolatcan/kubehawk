@@ -2,7 +2,6 @@
 
 This module provides display widgets that show content:
 - CustomDigits: Numeric display widget
-- CustomMarkdown: Markdown rendering widget
 - CustomMarkdownViewer: Scrollable markdown viewer widget
 - CustomProgressBar: Progress indicator widget
 - CustomRichLog: Rich log display widget
@@ -10,7 +9,6 @@ This module provides display widgets that show content:
 """
 
 from kubeagle.widgets.display.custom_digits import CustomDigits
-from kubeagle.widgets.display.custom_markdown import CustomMarkdown
 from kubeagle.widgets.display.custom_markdown_viewer import (
     CustomMarkdownViewer,
 )
@@ -22,7 +20,6 @@ from kubeagle.widgets.display.custom_static import CustomStatic
 
 __all__ = [
     "CustomDigits",
-    "CustomMarkdown",
     "CustomMarkdownViewer",
     "CustomProgressBar",
     "CustomRichLog",

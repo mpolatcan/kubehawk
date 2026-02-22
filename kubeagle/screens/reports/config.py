@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-# Report format options
-REPORT_FORMATS = ["full", "brief", "summary"]
-REPORT_TYPES = ["eks", "charts", "combined"]
-
 # Default values
 DEFAULT_REPORT_FORMAT = "full"
 DEFAULT_REPORT_TYPE = "combined"

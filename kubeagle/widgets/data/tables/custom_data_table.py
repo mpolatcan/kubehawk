@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable, Mapping
 from contextlib import asynccontextmanager, contextmanager, suppress
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -11,7 +12,10 @@ from textual.coordinate import Coordinate
 from textual.events import Event, Leave, MouseMove
 from textual.widgets import DataTable as TextualDataTable
 
+from kubeagle.constants.limits import MAX_ROWS_DISPLAY
 from kubeagle.keyboard import DATA_TABLE_BINDINGS
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -221,12 +225,15 @@ class CustomDataTable(Container):
         pass
 
     def watch_data(self, data: list[dict]) -> None:
-        """Update UI when data changes.
+        """Update UI when data changes only if content actually changed.
 
         Args:
             data: The new data value.
         """
-        self.refresh()
+        new_sig = (id(data), len(data) if data else 0)
+        if getattr(self, "_last_data_signature", None) != new_sig:
+            self._last_data_signature = new_sig
+            self.refresh()
 
     def watch_error(self, error: str | None) -> None:
         """Handle error state changes.
@@ -275,16 +282,23 @@ class CustomDataTable(Container):
             **kwargs: Row values as keyword arguments.
 
         Returns:
-            The row key.
+            The row key, or None if MAX_ROWS_DISPLAY exceeded.
         """
         if self._inner_widget is not None:
+            if self._inner_widget.row_count >= MAX_ROWS_DISPLAY:
+                return None
             return self._inner_widget.add_row(*args, **kwargs)
         return None
 
     def add_rows(self, rows: Iterable[Iterable[Any]]) -> list[Any]:
         """Add multiple rows to the data table in one call."""
         if self._inner_widget is not None:
-            return self._inner_widget.add_rows(rows)
+            # Materialize to list so we can check length and truncate.
+            materialized: list[Iterable[Any]] = list(rows)
+            if len(materialized) > MAX_ROWS_DISPLAY:
+                logger.warning("Truncating %d rows to %d", len(materialized), MAX_ROWS_DISPLAY)
+                materialized = materialized[:MAX_ROWS_DISPLAY]
+            return self._inner_widget.add_rows(materialized)
         return []
 
     def clear(self, columns: bool = False) -> None:
@@ -500,13 +514,14 @@ class CustomDataTable(Container):
         Returns:
             Row data tuple or None if index is out of range.
         """
-        if self._inner_widget is None:
+        if self._inner_widget is None or index < 0:
             return None
         with suppress(Exception):
-            rows = list(self._inner_widget.ordered_rows)
-            if 0 <= index < len(rows):
-                row = rows[index]
-                return self._extract_row_data(row)
+            for i, row in enumerate(self._inner_widget.ordered_rows):
+                if i == index:
+                    return self._extract_row_data(row)
+                if i > index:
+                    break
         return None
 
     def _extract_row_data(self, row: Any) -> tuple[Any, ...]:
@@ -554,10 +569,14 @@ class CustomDataTable(Container):
             return
         style = getattr(event, "style", None)
         meta = getattr(style, "meta", None)
-        table.tooltip = self._resolve_header_tooltip(meta) or self._default_tooltip
+        new_tooltip = self._resolve_header_tooltip(meta) or self._default_tooltip
+        if new_tooltip != getattr(self, "_last_tooltip", None):
+            self._last_tooltip = new_tooltip
+            table.tooltip = new_tooltip
 
     def on_leave(self, _: Leave) -> None:
         """Clear tooltip when leaving the table wrapper."""
+        self._last_tooltip = None
         if self._inner_widget is not None:
             self._inner_widget.tooltip = None
 
@@ -570,12 +589,12 @@ class CustomDataTable(Container):
         Returns:
             The RowKey at the given index, or None if unavailable.
         """
-        if self._inner_widget is None:
+        if self._inner_widget is None or index < 0:
             return None
         try:
-            rows = list(self._inner_widget.ordered_rows)
-            if 0 <= index < len(rows):
-                return rows[index].key
+            for i, row in enumerate(self._inner_widget.ordered_rows):
+                if i == index:
+                    return row.key
         except Exception:
             return None
         return None

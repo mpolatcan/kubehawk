@@ -7,4 +7,4 @@ from kubeagle.controllers.cluster.fetchers import (
 )
 from kubeagle.controllers.cluster.parsers import NodeParser
 
-__all__ = ["NodeFetcher", "EventFetcher", "PodFetcher", "NodeParser"]
+__all__ = ["EventFetcher", "NodeFetcher", "NodeParser", "PodFetcher"]

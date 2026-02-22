@@ -4,7 +4,6 @@ This module tests:
 - Tab ID constants (uniqueness, values)
 - Tab title mappings (completeness, types)
 - Table column definitions (counts, types, widths)
-- Widget ID constants (types, non-empty)
 - Event display limit constant
 
 All constants are imported from screens.cluster.config.
@@ -15,31 +14,10 @@ from __future__ import annotations
 from kubeagle.screens.cluster.config import (
     CLUSTER_TABLE_HEADER_TOOLTIPS,
     EVENTS_DETAIL_TABLE_COLUMNS,
-    EVENTS_EMPTY_ID,
-    EVENTS_TABLE_COLUMNS,
-    EVENTS_TABLE_ID,
     MAX_EVENTS_DISPLAY,
-    NODE_DIST_EMPTY_ID,
-    NODE_DIST_TABLE_COLUMNS,
-    NODE_DIST_TABLE_ID,
-    NODE_GROUPS_EMPTY_ID,
     NODE_GROUPS_TABLE_COLUMNS,
-    NODE_GROUPS_TABLE_ID,
     NODE_TABLE_COLUMNS,
-    NODES_EMPTY_ID,
-    NODES_TABLE_ID,
-    PDBS_EMPTY_ID,
     PDBS_TABLE_COLUMNS,
-    PDBS_TABLE_ID,
-    PODS_EMPTY_ID,
-    PODS_TABLE_COLUMNS,
-    PODS_TABLE_ID,
-    SINGLE_REPLICA_EMPTY_ID,
-    SINGLE_REPLICA_TABLE_COLUMNS,
-    SINGLE_REPLICA_TABLE_ID,
-    STATS_EMPTY_ID,
-    STATS_TABLE_COLUMNS,
-    STATS_TABLE_ID,
     TAB_EVENTS,
     TAB_GROUPS,
     TAB_HEALTH,
@@ -136,40 +114,23 @@ class TestClusterConfigColumns:
         """Test NODE_TABLE_COLUMNS uses combined request/limit utilization columns."""
         assert len(NODE_TABLE_COLUMNS) == 7
 
-    def test_pods_table_columns_count(self) -> None:
-        """Test PODS_TABLE_COLUMNS has 5 columns."""
-        assert len(PODS_TABLE_COLUMNS) == 5
-
-    def test_events_table_columns_count(self) -> None:
-        """Test EVENTS_TABLE_COLUMNS has 3 columns."""
-        assert len(EVENTS_TABLE_COLUMNS) == 3
+    def test_events_detail_table_columns_count(self) -> None:
+        """Test EVENTS_DETAIL_TABLE_COLUMNS has 5 columns."""
+        assert len(EVENTS_DETAIL_TABLE_COLUMNS) == 5
 
     def test_pdbs_table_columns_count(self) -> None:
         """Test PDBS_TABLE_COLUMNS has 10 columns."""
         assert len(PDBS_TABLE_COLUMNS) == 10
 
-    def test_single_replica_table_columns_count(self) -> None:
-        """Test SINGLE_REPLICA_TABLE_COLUMNS has 7 columns."""
-        assert len(SINGLE_REPLICA_TABLE_COLUMNS) == 7
-
-    def test_node_dist_table_columns_count(self) -> None:
-        """Test NODE_DIST_TABLE_COLUMNS has 3 columns."""
-        assert len(NODE_DIST_TABLE_COLUMNS) == 3
-
     def test_node_groups_table_columns_count(self) -> None:
         """Test NODE_GROUPS_TABLE_COLUMNS has combined request/limit triplets."""
         assert len(NODE_GROUPS_TABLE_COLUMNS) == 6
 
-    def test_stats_table_columns_count(self) -> None:
-        """Test STATS_TABLE_COLUMNS has 3 columns."""
-        assert len(STATS_TABLE_COLUMNS) == 3
-
     def test_all_columns_are_tuples(self) -> None:
         """Test each column is a (str, int) tuple."""
         all_column_defs = [
-            NODE_TABLE_COLUMNS, PODS_TABLE_COLUMNS, EVENTS_TABLE_COLUMNS,
-            PDBS_TABLE_COLUMNS, SINGLE_REPLICA_TABLE_COLUMNS,
-            NODE_DIST_TABLE_COLUMNS, NODE_GROUPS_TABLE_COLUMNS, STATS_TABLE_COLUMNS,
+            NODE_TABLE_COLUMNS, EVENTS_DETAIL_TABLE_COLUMNS,
+            PDBS_TABLE_COLUMNS, NODE_GROUPS_TABLE_COLUMNS,
         ]
         for columns in all_column_defs:
             for col in columns:
@@ -181,9 +142,8 @@ class TestClusterConfigColumns:
     def test_all_widths_positive(self) -> None:
         """Test all width values are greater than 0."""
         all_column_defs = [
-            NODE_TABLE_COLUMNS, PODS_TABLE_COLUMNS, EVENTS_TABLE_COLUMNS,
-            PDBS_TABLE_COLUMNS, SINGLE_REPLICA_TABLE_COLUMNS,
-            NODE_DIST_TABLE_COLUMNS, NODE_GROUPS_TABLE_COLUMNS, STATS_TABLE_COLUMNS,
+            NODE_TABLE_COLUMNS, EVENTS_DETAIL_TABLE_COLUMNS,
+            PDBS_TABLE_COLUMNS, NODE_GROUPS_TABLE_COLUMNS,
         ]
         for columns in all_column_defs:
             for col_name, col_width in columns:
@@ -214,9 +174,6 @@ class TestClusterConfigColumns:
         assert set(CLUSTER_TABLE_HEADER_TOOLTIPS["pdbs-table"].keys()) == {
             name for name, _ in PDBS_TABLE_COLUMNS
         }
-        assert set(CLUSTER_TABLE_HEADER_TOOLTIPS["single-replica-table"].keys()) == {
-            name for name, _ in SINGLE_REPLICA_TABLE_COLUMNS
-        }
 
     def test_cluster_table_header_tooltips_values_non_empty(self) -> None:
         """All header tooltip values should be non-empty strings."""
@@ -228,49 +185,12 @@ class TestClusterConfigColumns:
 
 
 # =============================================================================
-# Widget ID Tests
+# Event Limit Tests
 # =============================================================================
 
 
-class TestClusterConfigWidgetIDs:
-    """Test cluster config widget ID constants."""
-
-    def test_table_widget_ids_all_strings(self) -> None:
-        """Test all *_TABLE_ID constants are non-empty strings."""
-        table_ids = [
-            NODES_TABLE_ID, PODS_TABLE_ID, EVENTS_TABLE_ID, PDBS_TABLE_ID,
-            SINGLE_REPLICA_TABLE_ID, NODE_DIST_TABLE_ID, NODE_GROUPS_TABLE_ID,
-            STATS_TABLE_ID,
-        ]
-        for table_id in table_ids:
-            assert isinstance(table_id, str), f"Table ID {table_id} must be a string"
-            assert len(table_id) > 0, "Table ID must not be empty"
-
-    def test_empty_widget_ids_all_strings(self) -> None:
-        """Test all *_EMPTY_ID constants are non-empty strings."""
-        empty_ids = [
-            NODES_EMPTY_ID, PODS_EMPTY_ID, EVENTS_EMPTY_ID, PDBS_EMPTY_ID,
-            SINGLE_REPLICA_EMPTY_ID, NODE_DIST_EMPTY_ID, NODE_GROUPS_EMPTY_ID,
-            STATS_EMPTY_ID,
-        ]
-        for empty_id in empty_ids:
-            assert isinstance(empty_id, str), f"Empty ID {empty_id} must be a string"
-            assert len(empty_id) > 0, "Empty ID must not be empty"
-
-    def test_table_and_empty_ids_are_distinct(self) -> None:
-        """Test that table IDs and empty IDs do not overlap."""
-        table_ids = {
-            NODES_TABLE_ID, PODS_TABLE_ID, EVENTS_TABLE_ID, PDBS_TABLE_ID,
-            SINGLE_REPLICA_TABLE_ID, NODE_DIST_TABLE_ID, NODE_GROUPS_TABLE_ID,
-            STATS_TABLE_ID,
-        }
-        empty_ids = {
-            NODES_EMPTY_ID, PODS_EMPTY_ID, EVENTS_EMPTY_ID, PDBS_EMPTY_ID,
-            SINGLE_REPLICA_EMPTY_ID, NODE_DIST_EMPTY_ID, NODE_GROUPS_EMPTY_ID,
-            STATS_EMPTY_ID,
-        }
-        overlap = table_ids & empty_ids
-        assert len(overlap) == 0, f"Table and empty IDs should not overlap: {overlap}"
+class TestClusterConfigEventLimit:
+    """Test cluster config event limit constant."""
 
     def test_max_events_display_value(self) -> None:
         """Test MAX_EVENTS_DISPLAY has expected value."""
@@ -282,7 +202,7 @@ class TestClusterConfigWidgetIDs:
 # =============================================================================
 
 __all__ = [
-    "TestClusterConfigTabIDs",
     "TestClusterConfigColumns",
-    "TestClusterConfigWidgetIDs",
+    "TestClusterConfigEventLimit",
+    "TestClusterConfigTabIDs",
 ]

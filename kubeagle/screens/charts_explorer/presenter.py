@@ -21,6 +21,8 @@ class ChartsExplorerPresenter:
     Handles filtering, formatting, and grouping logic for the unified charts table.
     """
 
+    _chart_path_cache: dict[str, str] = {}
+
     def __init__(self) -> None:
         self._violations: dict[str, int] = {}
         self._violation_revision = 0
@@ -56,6 +58,9 @@ class ChartsExplorerPresenter:
     ) -> list[ChartInfo]:
         """Apply all filters and return matching charts.
 
+        Uses a single-pass approach when multiple filters are active to avoid
+        creating intermediate list copies for each filter stage.
+
         Args:
             charts: Full list of charts.
             view: Current view filter preset.
@@ -67,19 +72,7 @@ class ChartsExplorerPresenter:
         Returns:
             Filtered list of charts.
         """
-        result = list(charts)
-
-        # View filter
-        if view == ViewFilter.EXTREME_RATIOS:
-            result = [c for c in result if self._is_extreme_ratio(c)]
-        elif view == ViewFilter.SINGLE_REPLICA:
-            result = [c for c in result if c.replicas is not None and c.replicas == 1]
-        elif view == ViewFilter.NO_PDB:
-            result = [c for c in result if not c.pdb_enabled]
-        elif view == ViewFilter.WITH_VIOLATIONS:
-            result = [c for c in result if c.name in self._violations]
-
-        # Team filter
+        # Resolve team filter once
         team_values: set[str]
         if isinstance(team_filter, str):
             team_values = {team_filter}
@@ -88,23 +81,57 @@ class ChartsExplorerPresenter:
         else:
             team_values = set(team_filter)
 
-        if team_values:
-            result = [c for c in result if c.team in team_values]
+        has_view = view != ViewFilter.ALL
+        has_team = bool(team_values)
+        has_active = active_only and active_charts is not None
+        has_search = bool(search_query)
 
-        # Active filter
-        if active_only and active_charts is not None:
-            result = [c for c in result if c.name in active_charts]
+        # Fast path: no filters active — return original list reference
+        if not has_view and not has_team and not has_active and not has_search:
+            return charts
 
-        # Search filter
-        if search_query:
-            q = search_query.lower()
-            result = [
-                c for c in result
-                if q in c.name.lower()
-                or q in c.team.lower()
-                or q in c.values_file.lower()
-                or q in c.qos_class.value.lower()
-            ]
+        # Pre-compute search query once
+        q = search_query.lower() if has_search else ""
+
+        # Resolve view predicate
+        violations = self._violations
+        is_extreme = self._is_extreme_ratio
+
+        # Single-pass filter to avoid intermediate list allocations
+        result: list[ChartInfo] = []
+        for c in charts:
+            # View filter
+            if has_view:
+                if view == ViewFilter.EXTREME_RATIOS:
+                    if not is_extreme(c):
+                        continue
+                elif view == ViewFilter.SINGLE_REPLICA:
+                    if c.replicas is None or c.replicas != 1:
+                        continue
+                elif view == ViewFilter.NO_PDB:
+                    if c.pdb_enabled:
+                        continue
+                elif view == ViewFilter.WITH_VIOLATIONS and c.name not in violations:
+                    continue
+
+            # Team filter
+            if has_team and c.team not in team_values:
+                continue
+
+            # Active filter
+            if has_active and c.name not in active_charts:  # type: ignore[operator]
+                continue
+
+            # Search filter — pre-compute lowered fields to avoid repeated .lower()
+            if has_search and (
+                q not in c.name.lower()
+                and q not in c.team.lower()
+                and q not in c.values_file.lower()
+                and q not in c.qos_class.value.lower()
+            ):
+                continue
+
+            result.append(c)
 
         return result
 
@@ -196,6 +223,7 @@ class ChartsExplorerPresenter:
         mem_req_lim = self._format_req_lim_with_ratio(mem_req, mem_lim, mem_ratio_str)
 
         chart_name = self._format_chart_name(chart)
+        chart_path_display = self._format_chart_path(chart.values_file)
 
         return (
             chart_name,
@@ -209,7 +237,7 @@ class ChartsExplorerPresenter:
             probes_str,
             affinity,
             pdb,
-            chart.values_file,
+            chart_path_display,
         )
 
     # =========================================================================
@@ -308,7 +336,10 @@ class ChartsExplorerPresenter:
     @staticmethod
     def _classify_values_file_type(values_file: str) -> str:
         """Classify values file path into user-facing type labels."""
-        file_name = Path(values_file).name.lower()
+        source = values_file.strip()
+        if source.startswith("cluster:"):
+            return "Cluster"
+        file_name = Path(source).name.lower()
         if "automation" in file_name:
             return "Automation"
         if file_name == "values.yaml":
@@ -320,6 +351,8 @@ class ChartsExplorerPresenter:
     @staticmethod
     def _format_memory(bytes_val: float) -> str:
         """Format memory value from bytes to human readable string."""
+        if bytes_val <= 0:
+            return "-"
         if bytes_val >= 1024 * 1024 * 1024:
             return f"{bytes_val / (1024 * 1024 * 1024):.1f}Gi"
         if bytes_val >= 1024 * 1024:
@@ -365,12 +398,45 @@ class ChartsExplorerPresenter:
             return base_text
         return f"{base_text} [dim]·[/dim] {ratio_text}"
 
+    @classmethod
+    def _format_chart_path(cls, values_file: str) -> str:
+        """Format values file path for the Chart Path column.
+
+        Shows up to two ancestor directories so nested chart identity is
+        preserved (e.g. ``enigma/architect-api/values.yaml``).
+        Cluster sources (``cluster:ns``) pass through unchanged.
+        Results are cached since chart paths don't change between renders.
+        """
+        cached = cls._chart_path_cache.get(values_file)
+        if cached is not None:
+            return cached
+        if values_file.startswith("cluster:"):
+            cls._chart_path_cache[values_file] = values_file
+            return values_file
+        path = Path(values_file)
+        parent = path.parent.name
+        grandparent = path.parent.parent.name if parent else ""
+        if grandparent:
+            result = f"{grandparent}/{parent}/{path.name}"
+        elif parent:
+            result = f"{parent}/{path.name}"
+        else:
+            result = path.name
+        cls._chart_path_cache[values_file] = result
+        return result
+
     @staticmethod
     def _is_extreme_ratio(chart: ChartInfo) -> bool:
-        """Check if chart has extreme CPU or memory ratio."""
-        if chart.cpu_request and chart.cpu_limit and chart.cpu_request > 0 and chart.cpu_limit / chart.cpu_request >= EXTREME_RATIO_THRESHOLD:
+        """Check if chart has extreme CPU or memory ratio.
+
+        Uses local variable captures to avoid repeated attribute lookups on the
+        chart dataclass — measurable win when called in tight filter loops.
+        """
+        threshold = EXTREME_RATIO_THRESHOLD
+        cpu_req = chart.cpu_request
+        cpu_lim = chart.cpu_limit
+        if cpu_req > 0 and cpu_lim > 0 and cpu_lim / cpu_req >= threshold:
             return True
-        return bool(
-            chart.memory_request and chart.memory_limit and chart.memory_request > 0
-            and chart.memory_limit / chart.memory_request >= EXTREME_RATIO_THRESHOLD
-        )
+        mem_req = chart.memory_request
+        mem_lim = chart.memory_limit
+        return mem_req > 0 and mem_lim > 0 and mem_lim / mem_req >= threshold

@@ -713,7 +713,7 @@ class ReportExportScreen(MainNavigationTabsMixin, ScreenNavigator, WorkerMixin, 
             self._update_export_status("Copied to clipboard!", is_success=True)
             self.notify("Report copied to clipboard", severity="information")
         except Exception as e:
-            self._update_export_status(f"Error: {str(e)}", is_error=True)
+            self._update_export_status(f"Error: {e!s}", is_error=True)
             self.notify(f"Error copying to clipboard: {e}", severity="error")
         finally:
             # Clear loading states and re-enable buttons
@@ -992,7 +992,7 @@ class ReportExportScreen(MainNavigationTabsMixin, ScreenNavigator, WorkerMixin, 
             self._update_export_status(f"Saved to {save_path}", is_success=True)
             self.notify(f"Report saved to {save_path}", severity="information")
         except Exception as e:
-            self._update_export_status(f"Error: {str(e)}", is_error=True)
+            self._update_export_status(f"Error: {e!s}", is_error=True)
             self.notify(f"Error saving file: {e}", severity="error")
         finally:
             self._set_loading_state("btn-export", False)

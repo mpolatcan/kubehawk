@@ -41,23 +41,6 @@ class NodeParser:
                 return value
         return default
 
-    def parse_node_status(self, status: dict) -> NodeStatus:
-        """Parse node status from conditions.
-
-        Args Node status dictionary
-
-:
-            status:        Returns:
-            NodeStatus enum value.
-        """
-        for condition in status.get("conditions", []):
-            if (
-                condition.get("type") == "Ready"
-                and condition.get("status") == "True"
-            ):
-                return NodeStatus.READY
-        return NodeStatus.UNKNOWN
-
     def parse_node_info(
         self,
         node: dict,

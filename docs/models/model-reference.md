@@ -548,9 +548,6 @@ class WorkloadInventoryInfo(BaseModel):
     pod_count: int = 0
     restart_count: int = 0
     restart_reason_counts: dict[str, int] = Field(default_factory=dict)
-    aggressive_pod_outlier: bool = False
-    aggressive_pod_ratio: float | None = None
-
     # Node real usage stats (formatted strings)
     node_real_cpu_avg: str = "-"
     node_real_cpu_max: str = "-"
@@ -566,20 +563,6 @@ class WorkloadInventoryInfo(BaseModel):
     pod_real_memory_avg: str = "-"
     pod_real_memory_max: str = "-"
     pod_real_memory_p95: str = "-"
-
-    # Neighbor pressure metrics (formatted strings)
-    neighbor_cpu_pressure_max: str = "-"
-    neighbor_cpu_pressure_avg: str = "-"
-    neighbor_mem_pressure_max: str = "-"
-    neighbor_mem_pressure_avg: str = "-"
-    neighbor_cpu_req_pressure_max: str = "-"
-    neighbor_cpu_req_pressure_avg: str = "-"
-    neighbor_cpu_lim_pressure_max: str = "-"
-    neighbor_cpu_lim_pressure_avg: str = "-"
-    neighbor_mem_req_pressure_max: str = "-"
-    neighbor_mem_req_pressure_avg: str = "-"
-    neighbor_mem_lim_pressure_max: str = "-"
-    neighbor_mem_lim_pressure_avg: str = "-"
 
     # Detailed node and pod assignment info
     assigned_node_details: list[WorkloadAssignedNodeDetailInfo] = Field(default_factory=list)

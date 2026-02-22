@@ -1,10 +1,8 @@
 """Unit tests for screen-specific constants in constants/screens/*.py.
 
 Tests cover:
-- constants/screens/cluster.py: Tab IDs, tab names, status labels, loading/error messages
-- constants/screens/cluster.py: Event-window options for summary/events scope
-- constants/screens/settings.py: Section headers, validation messages, button labels
-- constants/screens/detail.py: Optimizer categories/severities, button/filter labels
+- constants/screens/cluster.py: Tab IDs, tab names, status labels, event-window options
+- constants/screens/settings.py: Section headers, button labels
 - constants/screens/common.py: Theme names (DARK_THEME, LIGHT_THEME)
 - constants/screens/charts_explorer.py: Screen title, search/button labels
 - constants/screens/__init__.py: Re-exports
@@ -13,20 +11,8 @@ Tests cover:
 from __future__ import annotations
 
 from kubeagle.constants.screens.cluster import (
-    CLUSTER_ERROR_LOADING,
     CLUSTER_EVENT_WINDOW_DEFAULT,
     CLUSTER_EVENT_WINDOW_OPTIONS,
-    LOADING_ANALYZING,
-    LOADING_CHECKING_CONNECTION,
-    LOADING_FETCHING_EVENTS,
-    LOADING_FETCHING_NODE_RESOURCES,
-    LOADING_FETCHING_NODES,
-    LOADING_FETCHING_PDBS,
-    LOADING_FETCHING_SINGLE_REPLICA,
-    LOADING_INITIALIZING,
-    STATUS_LABEL_CLUSTER,
-    STATUS_LABEL_NODES,
-    STATUS_LABEL_UPDATED,
     STATUS_NEVER,
     STATUS_UNKNOWN,
     TAB_EVENTS,
@@ -45,25 +31,12 @@ from kubeagle.constants.screens.common import (
     DARK_THEME,
     LIGHT_THEME,
 )
-from kubeagle.constants.screens.detail import (
-    BUTTON_APPLY_ALL,
-    BUTTON_FIX,
-    BUTTON_PREVIEW,
-    FILTER_CATEGORY,
-    FILTER_SEVERITY,
-    OPTIMIZER_CATEGORIES,
-    OPTIMIZER_SEVERITIES,
-)
 from kubeagle.constants.screens.settings import (
     BUTTON_CANCEL,
     BUTTON_SAVE,
-    SETTINGS_SAVE_SUCCESS,
-    SETTINGS_SCREEN_TITLE,
     SETTINGS_SECTION_AI_FIX,
-    SETTINGS_SECTION_CLUSTER,
     SETTINGS_SECTION_GENERAL,
     SETTINGS_SECTION_THRESHOLDS,
-    SETTINGS_VALIDATION_MESSAGES,
 )
 
 # =============================================================================
@@ -121,52 +94,11 @@ class TestClusterScreenConstants:
     def test_tab_stats_value(self) -> None:
         assert TAB_STATS == "0: Stats"
 
-    def test_status_label_cluster_value(self) -> None:
-        assert STATUS_LABEL_CLUSTER == "Cluster: "
-
-    def test_status_label_updated_value(self) -> None:
-        assert STATUS_LABEL_UPDATED == "Last Updated: "
-
     def test_status_never_value(self) -> None:
         assert STATUS_NEVER == "Never"
 
     def test_status_unknown_value(self) -> None:
         assert STATUS_UNKNOWN == "Unknown"
-
-    def test_status_label_nodes_value(self) -> None:
-        assert STATUS_LABEL_NODES == "Nodes: "
-
-    def test_loading_initializing_type(self) -> None:
-        assert isinstance(LOADING_INITIALIZING, str)
-
-    def test_loading_checking_connection_type(self) -> None:
-        assert isinstance(LOADING_CHECKING_CONNECTION, str)
-
-    def test_loading_fetching_nodes_type(self) -> None:
-        assert isinstance(LOADING_FETCHING_NODES, str)
-
-    def test_loading_fetching_events_type(self) -> None:
-        assert isinstance(LOADING_FETCHING_EVENTS, str)
-
-    def test_loading_fetching_single_replica_type(self) -> None:
-        assert isinstance(LOADING_FETCHING_SINGLE_REPLICA, str)
-
-    def test_loading_fetching_pdbs_type(self) -> None:
-        assert isinstance(LOADING_FETCHING_PDBS, str)
-
-    def test_loading_fetching_node_resources_type(self) -> None:
-        assert isinstance(LOADING_FETCHING_NODE_RESOURCES, str)
-
-    def test_loading_analyzing_type(self) -> None:
-        assert isinstance(LOADING_ANALYZING, str)
-
-    def test_cluster_error_loading_type(self) -> None:
-        assert isinstance(CLUSTER_ERROR_LOADING, str)
-
-    def test_cluster_error_loading_has_placeholder(self) -> None:
-        assert "{e}" in CLUSTER_ERROR_LOADING
-
-
 
 
 # =============================================================================
@@ -212,68 +144,11 @@ class TestSettingsScreenConstants:
     def test_section_ai_fix_value(self) -> None:
         assert SETTINGS_SECTION_AI_FIX == "AI Fix Settings"
 
-    def test_section_cluster_type(self) -> None:
-        assert isinstance(SETTINGS_SECTION_CLUSTER, str)
-
-    def test_validation_messages_type(self) -> None:
-        assert isinstance(SETTINGS_VALIDATION_MESSAGES, dict)
-
-    def test_validation_messages_non_empty(self) -> None:
-        assert len(SETTINGS_VALIDATION_MESSAGES) > 0
-
-    def test_validation_messages_values_are_tuples(self) -> None:
-        for key, value in SETTINGS_VALIDATION_MESSAGES.items():
-            assert isinstance(value, tuple), f"Validation entry {key} must be a tuple"
-            assert len(value) == 2, f"Validation entry {key} must have 2 elements"
-            assert isinstance(value[0], str), f"First element of {key} must be a string"
-
-    def test_save_success_type(self) -> None:
-        assert isinstance(SETTINGS_SAVE_SUCCESS, str)
-
     def test_button_save_type(self) -> None:
         assert isinstance(BUTTON_SAVE, str)
 
     def test_button_cancel_type(self) -> None:
         assert isinstance(BUTTON_CANCEL, str)
-
-    def test_screen_title_type(self) -> None:
-        assert isinstance(SETTINGS_SCREEN_TITLE, str)
-
-
-# =============================================================================
-# Detail screen constants
-# =============================================================================
-
-
-class TestDetailScreenConstants:
-    """Test detail screen constants."""
-
-    def test_optimizer_categories_type(self) -> None:
-        assert isinstance(OPTIMIZER_CATEGORIES, list)
-
-    def test_optimizer_categories_values(self) -> None:
-        assert OPTIMIZER_CATEGORIES == ["resources", "probes", "availability", "security"]
-
-    def test_optimizer_severities_type(self) -> None:
-        assert isinstance(OPTIMIZER_SEVERITIES, list)
-
-    def test_optimizer_severities_values(self) -> None:
-        assert OPTIMIZER_SEVERITIES == ["error", "warning", "info"]
-
-    def test_button_apply_all_type(self) -> None:
-        assert isinstance(BUTTON_APPLY_ALL, str)
-
-    def test_button_fix_type(self) -> None:
-        assert isinstance(BUTTON_FIX, str)
-
-    def test_button_preview_type(self) -> None:
-        assert isinstance(BUTTON_PREVIEW, str)
-
-    def test_filter_category_type(self) -> None:
-        assert isinstance(FILTER_CATEGORY, str)
-
-    def test_filter_severity_type(self) -> None:
-        assert isinstance(FILTER_SEVERITY, str)
 
 
 # =============================================================================

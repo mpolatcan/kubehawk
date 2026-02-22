@@ -20,10 +20,11 @@ import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, TypedDict, cast
 
 import yaml
 from rich.markup import escape
+from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
 from textual.events import Resize
@@ -1081,7 +1082,7 @@ class _ViolationsFiltersModal(ModalScreen[_ViolationsFiltersState | None]):
             classes="viol-filters-modal-shell selection-modal-shell"
         ):
             yield CustomStatic(
-                "Violations Filters",
+                "Optimizer Filters",
                 classes="viol-filters-modal-title selection-modal-title",
                 markup=False,
             )
@@ -3437,6 +3438,40 @@ class ViolationRefreshRequested(Message):
     """Posted when the violations view needs a data refresh."""
 
 
+# -- Performance caches (module-level) --
+
+_SEV_ORDER: dict[Severity, int] = {Severity.ERROR: 0, Severity.WARNING: 1, Severity.INFO: 2}
+
+_CAPITALIZED_CACHE: dict[str, str] = {}
+
+_LAYOUT_CLASSES = frozenset({"ultra", "wide", "medium", "narrow"})
+
+_SEV_TEXT: dict[Severity, Text] = {
+    Severity.ERROR: Text("ERROR", style="bold #ff3b30"),
+    Severity.WARNING: Text("WARN", style="#ff9f0a"),
+    Severity.INFO: Text("INFO", style="blue"),
+}
+_SEV_TEXT_UNKNOWN = Text("???")
+
+
+def _capitalize(s: str) -> str:
+    r = _CAPITALIZED_CACHE.get(s)
+    if r is None:
+        r = s.capitalize()
+        _CAPITALIZED_CACHE[s] = r
+    return r
+
+
+class _ViolationMeta(NamedTuple):
+    team: str
+    chart_path: str
+    chart_key: str
+    values_file_type: str
+    search_text: str
+    formatted_path: str
+    severity_rank: int
+
+
 class ViolationsView(CustomVertical):
     """Violations DataTable + fix preview panel."""
 
@@ -3458,6 +3493,8 @@ class ViolationsView(CustomVertical):
         self.team_filter: set[str] = {team_filter} if team_filter else set()
         self._chart_team_map: dict[str, str] = {}
         self._chart_path_map: dict[str, str] = {}
+        self._chart_by_path: dict[str, object] = {}
+        self._chart_by_name: dict[str, object] = {}
         self._filter_options: dict[str, list[tuple[str, str]]] = {}
         self._column_filter_options: tuple[tuple[str, str], ...] = tuple(
             (column_name, column_name) for column_name, _ in OPTIMIZER_TABLE_COLUMNS
@@ -3487,8 +3524,10 @@ class ViolationsView(CustomVertical):
         self._last_table_columns_signature: tuple[int, ...] | None = None
         self._table_populate_sequence: int = 0
         self._optimizer_controller_signature: tuple[str, int] | None = None
+        self._violation_meta: dict[int, _ViolationMeta] = {}
         self._ai_full_fix_cache: dict[str, dict[str, Any]] = {}
         self._ai_full_fix_artifacts: dict[str, AIFullFixStagedArtifact] = {}
+        self._background_tasks: set[asyncio.Task[Any]] = set()
 
     def _get_optimizer_controller(self) -> UnifiedOptimizerController:
         analysis_source = str(
@@ -3829,23 +3868,9 @@ class ViolationsView(CustomVertical):
 
         self.violations = violations
         self.charts = charts
-        self._chart_team_map = {
-            chart.name: chart.team
-            for chart in charts
-            if getattr(chart, "name", None) and getattr(chart, "team", None)
-        }
-        self._chart_path_map = {}
-        for chart in charts:
-            chart_name = getattr(chart, "name", None)
-            chart_path = getattr(chart, "values_file", None)
-            if not chart_name or not chart_path:
-                continue
-            existing_path = self._chart_path_map.get(chart_name)
-            if existing_path is None:
-                self._chart_path_map[chart_name] = chart_path
-            elif existing_path != chart_path:
-                # Multiple paths for same chart name, no single canonical path.
-                self._chart_path_map[chart_name] = ""
+        self._build_chart_indexes(charts)
+
+        self._violation_meta = self._build_violation_meta(violations)
 
         if not charts:
             self._show_no_charts_state()
@@ -3873,22 +3898,9 @@ class ViolationsView(CustomVertical):
         """Incrementally refresh violations table while analysis is still running."""
         self.violations = violations
         self.charts = charts
-        self._chart_team_map = {
-            chart.name: chart.team
-            for chart in charts
-            if getattr(chart, "name", None) and getattr(chart, "team", None)
-        }
-        self._chart_path_map = {}
-        for chart in charts:
-            chart_name = getattr(chart, "name", None)
-            chart_path = getattr(chart, "values_file", None)
-            if not chart_name or not chart_path:
-                continue
-            existing_path = self._chart_path_map.get(chart_name)
-            if existing_path is None:
-                self._chart_path_map[chart_name] = chart_path
-            elif existing_path != chart_path:
-                self._chart_path_map[chart_name] = ""
+        self._build_chart_indexes(charts)
+
+        self._violation_meta = self._build_violation_meta(violations)
 
         if charts:
             self._update_filter_dropdowns()
@@ -4051,7 +4063,13 @@ class ViolationsView(CustomVertical):
                 cluster_nodes=cluster_nodes,
             )
             impact_view = self.query_one("#impact-analysis-view", ResourceImpactView)
-            impact_view.set_data(result)
+            impact_view.set_source_data(
+                result,
+                charts=self.charts,
+                violations=self.violations,
+                optimizer_controller=controller,
+                cluster_nodes=cluster_nodes,
+            )
 
     def show_impact_view(self) -> None:
         """Show the impact analysis view and hide others."""
@@ -4075,6 +4093,43 @@ class ViolationsView(CustomVertical):
             self.query_one("#recommendations-view", RecommendationsView).display = True
         with contextlib.suppress(Exception):
             self.query_one("#impact-analysis-view", ResourceImpactView).display = False
+
+    # ------------------------------------------------------------------
+    # Chart indexes
+    # ------------------------------------------------------------------
+
+    def _build_chart_indexes(self, charts: list) -> None:
+        """Build lookup dicts from a charts list for O(1) access."""
+        team_map: dict[str, str] = {}
+        path_map: dict[str, str] = {}
+        by_path: dict[str, object] = {}
+        by_name: dict[str, object] = {}
+
+        for chart in charts:
+            chart_name = getattr(chart, "name", None)
+            chart_team = getattr(chart, "team", None)
+            chart_path = getattr(chart, "values_file", None)
+
+            if not chart_name:
+                continue
+
+            if chart_team:
+                team_map[chart_name] = chart_team
+
+            if chart_path:
+                by_path.setdefault(chart_path, chart)
+                existing = path_map.get(chart_name)
+                if existing is None:
+                    path_map[chart_name] = chart_path
+                elif existing != chart_path:
+                    path_map[chart_name] = ""
+
+            by_name.setdefault(chart_name, chart)
+
+        self._chart_team_map = team_map
+        self._chart_path_map = path_map
+        self._chart_by_path = by_path
+        self._chart_by_name = by_name
 
     # ------------------------------------------------------------------
     # Filtering
@@ -4104,10 +4159,6 @@ class ViolationsView(CustomVertical):
             return "Default"
         return "Other"
 
-    def _get_violation_values_file_type(self, violation: ViolationResult) -> str:
-        chart_path = self._get_violation_chart_path(violation)
-        return self._values_file_type_from_path(chart_path)
-
     def _bulk_chart_display_name(self, chart: object) -> str:
         chart_name = str(getattr(chart, "chart_name", "") or getattr(chart, "name", "") or "chart")
         values_file = str(getattr(chart, "values_file", "") or "")
@@ -4118,54 +4169,83 @@ class ViolationsView(CustomVertical):
         chart_path = self._get_violation_chart_path(violation)
         return chart_path if chart_path else violation.chart_name
 
+    def _build_violation_meta(
+        self, violations: list[ViolationResult],
+    ) -> dict[int, _ViolationMeta]:
+        """Pre-compute per-violation derived fields for O(1) lookups."""
+        meta: dict[int, _ViolationMeta] = {}
+        fmt_path = self._format_chart_path_display
+        chart_team = self._chart_team_map
+        chart_path_map = self._chart_path_map
+        vft_from_path = self._values_file_type_from_path
+        for v in violations:
+            team = v.team or chart_team.get(v.chart_name, "Unknown")
+            cp = v.chart_path or chart_path_map.get(v.chart_name, "")
+            ck = cp if cp else v.chart_name
+            vft = vft_from_path(cp)
+            st = f"{v.chart_name}\0{v.rule_name}\0{cp}\0{vft}\0{v.description}\0{v.category}\0{team}".lower()
+            fp = fmt_path(cp) if cp else "-"
+            sr = _SEV_ORDER.get(v.severity, 99)
+            meta[id(v)] = _ViolationMeta(team, cp, ck, vft, st, fp, sr)
+        return meta
+
+    def _meta(self, v: ViolationResult) -> _ViolationMeta:
+        """Return cached per-violation derived fields."""
+        m = self._violation_meta.get(id(v))
+        if m is not None:
+            return m
+        team = self._get_violation_team(v)
+        chart_path = self._get_violation_chart_path(v)
+        chart_key = chart_path if chart_path else v.chart_name
+        vft = self._values_file_type_from_path(chart_path)
+        search_text = f"{v.chart_name}\0{v.rule_name}\0{chart_path}\0{vft}\0{v.description}\0{v.category}\0{team}".lower()
+        formatted_path = self._format_chart_path_display(chart_path) if chart_path else "-"
+        sev_rank = _SEV_ORDER.get(v.severity, 99)
+        entry = _ViolationMeta(team, chart_path, chart_key, vft, search_text, formatted_path, sev_rank)
+        self._violation_meta[id(v)] = entry
+        return entry
+
     def _format_chart_filter_label(self, violation: ViolationResult) -> str:
-        values_file_type = self._get_violation_values_file_type(violation)
-        return f"{violation.chart_name} ({values_file_type})"
+        return f"{violation.chart_name} ({self._meta(violation).values_file_type})"
 
     def _find_chart_for_violation(self, violation: ViolationResult) -> Any | None:
         chart_path = self._get_violation_chart_path(violation)
         if chart_path:
-            chart = next(
-                (
-                    c for c in self.charts
-                    if getattr(c, "values_file", None) == chart_path
-                ),
-                None,
-            )
+            chart = self._chart_by_path.get(chart_path)
             if chart is not None:
                 return chart
-        return next(
-            (c for c in self.charts if getattr(c, "name", None) == violation.chart_name),
-            None,
-        )
+        return self._chart_by_name.get(violation.chart_name)
 
     def get_filtered_violations(self, violations: list[ViolationResult]) -> list[ViolationResult]:
-        result = violations.copy()
-        if self.team_filter:
-            result = [v for v in result if self._get_violation_team(v) in self.team_filter]
-        if self.category_filter:
-            result = [v for v in result if v.category in self.category_filter]
-        if self.severity_filter:
-            result = [v for v in result if v.severity.value in self.severity_filter]
-        if self.rule_filter:
-            result = [v for v in result if v.rule_name in self.rule_filter]
-        if self.chart_filter:
-            result = [v for v in result if self._get_violation_chart_key(v) in self.chart_filter]
-        if self.values_file_type_filter:
-            result = [
-                v for v in result
-                if self._get_violation_values_file_type(v).lower() in self.values_file_type_filter
-            ]
-        if self.search_query:
-            q = self.search_query.lower()
-            result = [
-                v for v in result
-                if q in v.chart_name.lower() or q in v.rule_name.lower()
-                or q in self._get_violation_chart_path(v).lower()
-                or q in self._get_violation_values_file_type(v).lower()
-                or q in v.description.lower()
-                or q in v.category.lower() or q in self._get_violation_team(v).lower()
-            ]
+        # Single-pass filter using pre-computed _meta() lookups.
+        team_f = self.team_filter
+        cat_f = self.category_filter
+        sev_f = self.severity_filter
+        rule_f = self.rule_filter
+        chart_f = self.chart_filter
+        vft_f = self.values_file_type_filter
+        q = self.search_query.strip().lower() if self.search_query else ""
+        has_any = team_f or cat_f or sev_f or rule_f or chart_f or vft_f or q
+        if not has_any:
+            return violations
+        result: list[ViolationResult] = []
+        for v in violations:
+            meta = self._meta(v)
+            if team_f and meta.team not in team_f:
+                continue
+            if cat_f and v.category not in cat_f:
+                continue
+            if sev_f and v.severity.value not in sev_f:
+                continue
+            if rule_f and v.rule_name not in rule_f:
+                continue
+            if chart_f and meta.chart_key not in chart_f:
+                continue
+            if vft_f and meta.values_file_type.lower() not in vft_f:
+                continue
+            if q and q not in meta.search_text:
+                continue
+            result.append(v)
         return result
 
     @on(Select.Changed, "#sort-select")
@@ -4226,15 +4306,15 @@ class ViolationsView(CustomVertical):
         def _filter_and_sort(
             violations: list[ViolationResult], sf: str, sr: bool,
         ) -> list[ViolationResult]:
-            sev_order = {Severity.ERROR: 0, Severity.WARNING: 1, Severity.INFO: 2}
             filtered = self.get_filtered_violations(violations)
 
             def sort_key(v: ViolationResult) -> tuple[object, ...]:
-                severity_rank = sev_order.get(v.severity, 99)
-                team_name = self._get_violation_team(v)
+                meta = self._meta(v)
+                severity_rank = meta.severity_rank
+                team_name = meta.team
+                chart_key = meta.chart_key
+                values_file_type = meta.values_file_type
                 rule_name = v.rule_name
-                chart_key = self._get_violation_chart_key(v)
-                values_file_type = self._get_violation_values_file_type(v)
                 if sf == SORT_SEVERITY:
                     return (
                         severity_rank,
@@ -4291,7 +4371,7 @@ class ViolationsView(CustomVertical):
                 if sequence != self._table_populate_sequence:
                     return
                 selected_key = self._violation_selection_key(self.selected_violation)
-                if len(self.violations) > 500:
+                if len(self.violations) > 50:
                     result = await asyncio.to_thread(_filter_and_sort, self.violations, sf, sr)
                 else:
                     result = _filter_and_sort(self.violations, sf, sr)
@@ -4308,7 +4388,7 @@ class ViolationsView(CustomVertical):
                 def _build_visible_rows(
                     violations: list[ViolationResult],
                     col_indices: tuple[int, ...],
-                ) -> list[tuple[str, ...]]:
+                ) -> list[tuple[str | Text, ...]]:
                     return [
                         tuple(
                             row_values[index]
@@ -4320,7 +4400,7 @@ class ViolationsView(CustomVertical):
                         )
                     ]
 
-                if result and len(result) > 500:
+                if result and len(result) > 50:
                     visible_rows = await asyncio.to_thread(
                         _build_visible_rows,
                         result,
@@ -4334,8 +4414,11 @@ class ViolationsView(CustomVertical):
                 async with table.batch():
                     if sequence != self._table_populate_sequence:
                         return
-                    if table.data_table is not None:
-                        table.data_table.fixed_columns = self._locked_fixed_column_count(
+                    # Opt 1: disable cursor animation during bulk row insert
+                    dt = table.data_table
+                    if dt is not None:
+                        dt.show_cursor = False
+                        dt.fixed_columns = self._locked_fixed_column_count(
                             visible_column_indices,
                         )
                     if columns_changed:
@@ -4358,6 +4441,9 @@ class ViolationsView(CustomVertical):
                         table.add_rows(visible_rows)
                         if selected_row is not None:
                             table.cursor_row = selected_row
+                    # Restore cursor after bulk insert
+                    if dt is not None:
+                        dt.show_cursor = True
                     if not result:
                         self._add_state_row(
                             table,
@@ -4394,26 +4480,38 @@ class ViolationsView(CustomVertical):
         except Exception as e:
             logger.warning("Failed to add row for %s: %s", violation.rule_name, e)
 
-    def _build_violation_table_row(self, violation: ViolationResult) -> tuple[str, ...]:
+    def _build_violation_table_row(self, violation: ViolationResult) -> tuple[str | Text, ...]:
         """Build one canonical violations row aligned with OPTIMIZER_TABLE_COLUMNS order."""
-        sev_markup = {
-            Severity.ERROR: "[bold #ff3b30]ERROR[/]",
-            Severity.WARNING: "[#ff9f0a]WARN[/#ff9f0a]",
-            Severity.INFO: "[blue]INFO[/]",
-        }.get(violation.severity, "???")
-        team_name = self._get_violation_team(violation)
-        values_file_type = self._get_violation_values_file_type(violation)
-        chart_path = self._get_violation_chart_path(violation) or "-"
+        meta = self._meta(violation)
         return (
             violation.chart_name,
-            team_name,
-            values_file_type,
-            sev_markup,
-            violation.category.capitalize(),
+            meta.team,
+            meta.values_file_type,
+            _SEV_TEXT.get(violation.severity, _SEV_TEXT_UNKNOWN),
+            _capitalize(violation.category),
             violation.rule_name,
             violation.current_value,
-            chart_path,
+            meta.formatted_path,
         )
+
+    @staticmethod
+    def _format_chart_path_display(values_file: str) -> str:
+        """Format values file path for the Chart Path column.
+
+        Shows up to two ancestor directories so nested chart identity is
+        preserved (e.g. ``enigma/architect-api/values.yaml``).
+        Cluster sources (``cluster:ns``) pass through unchanged.
+        """
+        if values_file.startswith("cluster:"):
+            return values_file
+        path = Path(values_file)
+        parent = path.parent.name
+        grandparent = path.parent.parent.name if parent else ""
+        if grandparent:
+            return f"{grandparent}/{parent}/{path.name}"
+        if parent:
+            return f"{parent}/{path.name}"
+        return path.name
 
     def _iter_visible_column_names(self) -> tuple[str, ...]:
         """Return visible table columns in canonical optimizer order."""
@@ -4549,7 +4647,7 @@ class ViolationsView(CustomVertical):
         )
 
         values_type_options = sorted({
-            self._get_violation_values_file_type(v).lower()
+            self._meta(v).values_file_type.lower()
             for v in self.violations
         })
         values_file_type_options = [
@@ -4688,39 +4786,37 @@ class ViolationsView(CustomVertical):
         self._update_filters_button_label()
         self.populate_violations_table()
 
-    def _update_filter_bar_layout(self) -> None:
+    @staticmethod
+    def _swap_layout_class(widget: Any, mode: str, extras: frozenset[str] = frozenset()) -> None:
+        """Replace layout breakpoint classes with *mode* in one operation."""
+        to_remove = _LAYOUT_CLASSES | extras
+        for cn in to_remove:
+            widget.remove_class(cn)
+        widget.add_class(mode)
+
+    def _update_filter_bar_layout(self, mode: str) -> None:
         """Apply responsive breakpoint class to filter bar."""
-        mode = self._get_layout_mode()
-        for class_name in ("ultra", "wide", "medium", "narrow"):
-            self.remove_class(class_name)
-        self.add_class(mode)
+        self._swap_layout_class(self, mode)
         with contextlib.suppress(Exception):
             filter_bar = self.query_one("#filter-bar", CustomVertical)
-            for class_name in ("ultra", "wide", "medium", "narrow", "stacked", "compact", "advanced-visible"):
-                filter_bar.remove_class(class_name)
-            filter_bar.add_class(mode)
+            self._swap_layout_class(
+                filter_bar, mode, frozenset({"stacked", "compact", "advanced-visible"}),
+            )
         self._sync_advanced_filter_state()
 
-    def _update_main_content_layout(self) -> None:
+    def _update_main_content_layout(self, mode: str) -> None:
         """Switch violations table/preview between side-by-side and stacked layouts."""
-        mode = self._get_layout_mode()
         with contextlib.suppress(Exception):
             main_content = self.query_one("#main-content", CustomHorizontal)
-            for class_name in ("ultra", "wide", "medium", "narrow", "stacked"):
-                main_content.remove_class(class_name)
-            main_content.add_class(mode)
+            self._swap_layout_class(main_content, mode, frozenset({"stacked"}))
             if mode == "narrow":
                 main_content.add_class("stacked")
 
-    def _update_row_layouts(self) -> None:
+    def _update_row_layouts(self, mode: str) -> None:
         """Stack action row vertically on very narrow terminals."""
-        mode = self._get_layout_mode()
         with contextlib.suppress(Exception):
             action_bar = self.query_one("#action-bar", CustomHorizontal)
-            if mode == "narrow":
-                action_bar.add_class("stacked")
-            else:
-                action_bar.remove_class("stacked")
+            action_bar.set_class(mode == "narrow", "stacked")
 
     def _get_layout_mode(self) -> str:
         width = self.size.width
@@ -4741,12 +4837,12 @@ class ViolationsView(CustomVertical):
         if mode == self._layout_mode:
             return
         self._layout_mode = mode
-        self._update_filter_bar_layout()
+        self._update_filter_bar_layout(mode)
         self._update_scroll_layout()
         self._update_filters_button_label()
         self._apply_static_action_button_widths()
-        self._update_main_content_layout()
-        self._update_row_layouts()
+        self._update_main_content_layout(mode)
+        self._update_row_layouts(mode)
 
     def _update_scroll_layout(self) -> None:
         """Let inner tables/trees own scrolling; keep action row in normal flow."""
@@ -4931,13 +5027,17 @@ class ViolationsView(CustomVertical):
         if chart is None:
             self.notify(f"Chart not found for '{violation.chart_name}'", severity="error")
             return
-        asyncio.create_task(self._open_ai_full_fix_modal_for_single_violation(violation, chart))
+        _task = asyncio.create_task(self._open_ai_full_fix_modal_for_single_violation(violation, chart))
+        self._background_tasks.add(_task)
+        _task.add_done_callback(self._background_tasks.discard)
 
     def _show_fix_preview(self, violation: ViolationResult) -> None:
         if violation.fix_available:
             chart = self._find_chart_for_violation(violation)
             if chart is not None:
-                asyncio.create_task(self._open_ai_full_fix_modal_for_single_violation(violation, chart))
+                _task = asyncio.create_task(self._open_ai_full_fix_modal_for_single_violation(violation, chart))
+                self._background_tasks.add(_task)
+                _task.add_done_callback(self._background_tasks.discard)
                 return
 
         self._fix_yaml_cache = ""
@@ -5742,7 +5842,7 @@ class ViolationsView(CustomVertical):
             response_values_patch_text = _full_fix_values_yaml_text(
                 ai_result.response.values_patch
             )
-            if direct_artifact is None or values_patch_text.strip() in {"", "{}"} and response_values_patch_text.strip() != "{}":
+            if direct_artifact is None or (values_patch_text.strip() in {"", "{}"} and response_values_patch_text.strip() != "{}"):
                 values_patch_text = response_values_patch_text
             template_patches = list(ai_result.response.template_patches)
             template_patches_json = json.dumps(
@@ -6137,7 +6237,9 @@ class ViolationsView(CustomVertical):
                         self._cleanup_ai_full_fix_artifact(artifact_key)
                     self._ai_full_fix_cache.pop(cache_key, None)
                 return
-            asyncio.create_task(self._handle_single_ai_full_fix_action(violation, chart, result))
+            _task = asyncio.create_task(self._handle_single_ai_full_fix_action(violation, chart, result))
+            self._background_tasks.add(_task)
+            _task.add_done_callback(self._background_tasks.discard)
 
         self.app.push_screen(modal, _on_dismiss)
         if preset_status_text is None:
@@ -6368,7 +6470,9 @@ class ViolationsView(CustomVertical):
             for task in populate_tasks:
                 if not task.done():
                     task.cancel()
-            asyncio.create_task(self._handle_bulk_ai_full_fix_action(grouped, dialog_title, result))
+            _task = asyncio.create_task(self._handle_bulk_ai_full_fix_action(grouped, dialog_title, result))
+            self._background_tasks.add(_task)
+            _task.add_done_callback(self._background_tasks.discard)
 
         self.app.push_screen(modal, _on_dismiss)
 
@@ -6781,7 +6885,9 @@ class ViolationsView(CustomVertical):
             if result is None:
                 self._cleanup_success_ai_full_fix_artifacts()
                 return
-            asyncio.create_task(self._handle_bulk_ai_full_fix_action(grouped, dialog_title, result))
+            _task = asyncio.create_task(self._handle_bulk_ai_full_fix_action(grouped, dialog_title, result))
+            self._background_tasks.add(_task)
+            _task.add_done_callback(self._background_tasks.discard)
 
         self.app.push_screen(modal, _on_dismiss)
 
@@ -6906,7 +7012,9 @@ class ViolationsView(CustomVertical):
         if not fixable:
             self.notify("No fixable violations found", severity="information")
             return
-        asyncio.create_task(self._open_ai_full_fix_bulk_modal(fixable, "Fix All"))
+        _task = asyncio.create_task(self._open_ai_full_fix_bulk_modal(fixable, "Fix All"))
+        self._background_tasks.add(_task)
+        _task.add_done_callback(self._background_tasks.discard)
 
     async def _apply_all_fixes(
         self,
@@ -7038,7 +7146,8 @@ class ViolationsView(CustomVertical):
         elif btn == "filters-btn":
             self._open_filters_modal()
 
-    def on_data_table_row_selected(self, event: object) -> None:
+    def _select_violation_at(self, event: object) -> None:
+        """Select the violation at the row indicated by *event* and update buttons."""
         event_obj = cast(Any, event)
         row_index = getattr(event_obj, "cursor_row", None)
         if not isinstance(row_index, int):
@@ -7051,6 +7160,12 @@ class ViolationsView(CustomVertical):
             return
         self.selected_violation = violation
         self._update_action_states()
+
+    def on_data_table_row_highlighted(self, event: object) -> None:
+        self._select_violation_at(event)
+
+    def on_data_table_row_selected(self, event: object) -> None:
+        self._select_violation_at(event)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -7218,4 +7333,4 @@ class ViolationsView(CustomVertical):
         return False
 
 
-__all__ = ["ViolationsView", "ViolationRefreshRequested"]
+__all__ = ["ViolationRefreshRequested", "ViolationsView"]

@@ -254,11 +254,11 @@ class TestChartDetailScreenWorkerMixin:
 # =============================================================================
 
 __all__ = [
-    "TestChartDetailScreenWidgetComposition",
+    "TestChartDetailScreenActionMethods",
+    "TestChartDetailScreenErrorHandling",
     "TestChartDetailScreenKeybindings",
     "TestChartDetailScreenLoadingStates",
     "TestChartDetailScreenMessageHandlers",
-    "TestChartDetailScreenErrorHandling",
-    "TestChartDetailScreenActionMethods",
+    "TestChartDetailScreenWidgetComposition",
     "TestChartDetailScreenWorkerMixin",
 ]

@@ -34,30 +34,8 @@ TAB_STATS: Final = "0: Stats"
 # Status bar
 # ============================================================================
 
-STATUS_LABEL_CLUSTER: Final = "Cluster: "
-STATUS_LABEL_NODES: Final = "Nodes: "
-STATUS_LABEL_UPDATED: Final = "Last Updated: "
 STATUS_NEVER: Final = "Never"
 STATUS_UNKNOWN: Final = "Unknown"
-
-# ============================================================================
-# Loading messages
-# ============================================================================
-
-LOADING_INITIALIZING: Final = "Initializing..."
-LOADING_CHECKING_CONNECTION: Final = "Checking cluster connection..."
-LOADING_FETCHING_NODES: Final = "Fetching nodes..."
-LOADING_FETCHING_EVENTS: Final = "Fetching events..."
-LOADING_FETCHING_SINGLE_REPLICA: Final = "Fetching single replica workloads..."
-LOADING_FETCHING_PDBS: Final = "Fetching PodDisruptionBudgets..."
-LOADING_FETCHING_NODE_RESOURCES: Final = "Fetching node resources..."
-LOADING_ANALYZING: Final = "Analyzing node groups..."
-
-# ============================================================================
-# Error messages
-# ============================================================================
-
-CLUSTER_ERROR_LOADING: Final = "Failed to load cluster data: {e}"
 
 # ============================================================================
 # Event window options
@@ -72,31 +50,19 @@ CLUSTER_EVENT_WINDOW_OPTIONS: Final[tuple[tuple[str, str], ...]] = (
 CLUSTER_EVENT_WINDOW_DEFAULT: Final = "0.25"
 
 __all__ = [
-    "TAB_IDS",
-    "TAB_OVERVIEW",
-    "TAB_NODES",
-    "TAB_PODS",
-    "TAB_EVENTS",
-    "TAB_PDBS",
-    "TAB_SINGLE_REPLICA",
-    "TAB_HEALTH",
-    "TAB_NODE_DIST",
-    "TAB_GROUPS",
-    "TAB_STATS",
-    "STATUS_LABEL_CLUSTER",
-    "STATUS_LABEL_NODES",
-    "STATUS_LABEL_UPDATED",
+    "CLUSTER_EVENT_WINDOW_DEFAULT",
+    "CLUSTER_EVENT_WINDOW_OPTIONS",
     "STATUS_NEVER",
     "STATUS_UNKNOWN",
-    "LOADING_INITIALIZING",
-    "LOADING_CHECKING_CONNECTION",
-    "LOADING_FETCHING_NODES",
-    "LOADING_FETCHING_EVENTS",
-    "LOADING_FETCHING_SINGLE_REPLICA",
-    "LOADING_FETCHING_PDBS",
-    "LOADING_FETCHING_NODE_RESOURCES",
-    "LOADING_ANALYZING",
-    "CLUSTER_ERROR_LOADING",
-    "CLUSTER_EVENT_WINDOW_OPTIONS",
-    "CLUSTER_EVENT_WINDOW_DEFAULT",
+    "TAB_EVENTS",
+    "TAB_GROUPS",
+    "TAB_HEALTH",
+    "TAB_IDS",
+    "TAB_NODES",
+    "TAB_NODE_DIST",
+    "TAB_OVERVIEW",
+    "TAB_PDBS",
+    "TAB_PODS",
+    "TAB_SINGLE_REPLICA",
+    "TAB_STATS",
 ]

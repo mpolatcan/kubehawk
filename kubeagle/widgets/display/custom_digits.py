@@ -18,6 +18,13 @@ from contextlib import suppress
 from textual.timer import Timer
 from textual.widgets import Digits as TextualDigits
 
+# Pre-computed cosine ease-in-out values for counter animation.
+# Index i maps to eased progress for step (i+1) out of 12 max steps.
+_EASING_TABLE: tuple[float, ...] = tuple(
+    0.5 - (0.5 * math.cos(math.pi * ((i + 1) / 12)))
+    for i in range(12)
+)
+
 
 class CustomDigits(TextualDigits):
     """Custom digits display widget with standardized styling.
@@ -43,14 +50,16 @@ class CustomDigits(TextualDigits):
     _UPDATE_ANIMATION_CLASS = "value-updated"
     _DEFAULT_UPDATE_ANIMATION_SECONDS = 0.45
     _COUNTER_SMOOTH_EXTRA_SECONDS = 0.65
-    _COUNTER_MAX_STEPS = 24
-    _COUNTER_MIN_FRAME_SECONDS = 0.015
+    _COUNTER_MAX_STEPS = 12
+    _COUNTER_MIN_FRAME_SECONDS = 0.03
     _COUNTER_MAX_FRAME_SECONDS = 0.08
     _ANIMATABLE_VALUE_RE = re.compile(
         r"^\s*(?P<prefix>[^\d+\-]*?)"
         r"(?P<number>[-+]?\d+(?:\.\d+)?)"
         r"(?P<suffix>[^\d]*)\s*$"
     )
+    # Reference to module-level pre-computed easing table for counter animation.
+    _EASING_TABLE = _EASING_TABLE
 
     @staticmethod
     def _has_non_ascii(text: str) -> bool:
@@ -174,7 +183,7 @@ class CustomDigits(TextualDigits):
     ) -> str:
         """Format one animation frame while preserving prefix/suffix style."""
         if decimals <= 0:
-            frame_value = str(int(round(numeric_value)))
+            frame_value = str(round(numeric_value))
         else:
             frame_value = f"{numeric_value:.{decimals}f}"
         return f"{prefix}{frame_value}{suffix}"
@@ -236,10 +245,10 @@ class CustomDigits(TextualDigits):
         delta = target_numeric - current_numeric
         if decimals > 0:
             precision_scale = 10**decimals
-            estimated_steps = int(round(abs(delta) * precision_scale))
+            estimated_steps = round(abs(delta) * precision_scale)
             steps = max(1, min(estimated_steps, self._COUNTER_MAX_STEPS))
         else:
-            steps = max(1, min(int(round(abs(delta))), self._COUNTER_MAX_STEPS))
+            steps = max(1, min(round(abs(delta)), self._COUNTER_MAX_STEPS))
         if duration is None:
             step_ratio = steps / self._COUNTER_MAX_STEPS
             total_seconds = self._DEFAULT_UPDATE_ANIMATION_SECONDS + (
@@ -274,8 +283,10 @@ class CustomDigits(TextualDigits):
                 self._schedule_update_animation_clear(max(0.12, total_seconds * 0.25))
                 return
 
-            progress = step_index / steps
-            eased_progress = 0.5 - (0.5 * math.cos(math.pi * progress))
+            # Look up pre-computed easing value; scale index to match table size.
+            table_index = round(step_index * (CustomDigits._COUNTER_MAX_STEPS - 1) / steps)
+            table_index = min(table_index, CustomDigits._COUNTER_MAX_STEPS - 1)
+            eased_progress = CustomDigits._EASING_TABLE[table_index]
             interpolated = current_numeric + (delta * eased_progress)
             self._set_display_value(
                 self._format_animatable_value(

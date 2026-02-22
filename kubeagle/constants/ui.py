@@ -6,15 +6,12 @@ for backward compatibility.
 
 from kubeagle.constants import (
     DARK_THEME,
-    DEFAULT_THEME,
     INSIDERONE_DARK_THEME,
     LIGHT_THEME,
 )
 from kubeagle.constants.enums import (
     AppState,
-    FetchSources,
     FetchState,
-    LoadingState,
     NodeStatus,
     QoSClass,
     Severity,
@@ -22,18 +19,15 @@ from kubeagle.constants.enums import (
 )
 
 __all__ = [
-    "AppState",
     "CATEGORIES",
     "DARK_THEME",
-    "DEFAULT_THEME",
-    "FetchSources",
-    "FetchState",
-    "LIGHT_THEME",
     "INSIDERONE_DARK_THEME",
-    "LoadingState",
+    "LIGHT_THEME",
+    "SEVERITIES",
+    "AppState",
+    "FetchState",
     "NodeStatus",
     "QoSClass",
-    "SEVERITIES",
     "Severity",
     "ThemeMode",
 ]

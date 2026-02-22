@@ -673,19 +673,6 @@ OptimizerScreen {
 
 .viol-filters-modal-actions {
     margin-top: 0;
-    layout: grid;
-    grid-size: 2 1;
-    grid-columns: 1fr 1fr;
-    grid-gutter: 3 0;
-    padding: 0 1;
-}
-
-.viol-filters-modal-actions > CustomButton {
-    margin-right: 1;
-}
-
-.viol-filters-modal-actions > CustomButton:last-child {
-    margin-right: 0;
 }
 
 /* --- Shared fix/details modal --- */
@@ -2665,4 +2652,93 @@ Select.cluster-tab-order {
     content-align: center middle;
     padding: 2 0;
     display: none;
+}
+
+/* --- Impact Filter Bar --- */
+
+#impact-filter-bar {
+    height: auto;
+    min-height: 3;
+    padding: 0 0;
+    margin: 0 0 1 0;
+    background: $surface;
+    border: round $surface-lighten-1 40%;
+    content-align: left middle;
+}
+
+#impact-filters-btn {
+    width: auto;
+    min-width: 12;
+    height: 3;
+    margin-right: 1;
+}
+
+#impact-filters-summary {
+    width: 1fr;
+    height: 3;
+    content-align: left middle;
+    color: $text-muted;
+    padding: 0 1;
+}
+
+/* --- Impact Filters Modal --- */
+
+.impact-filters-modal-shell {
+    max-width: 120;
+    height: 1fr;
+}
+
+.impact-filters-modal-title {
+    margin-bottom: 1;
+}
+
+.impact-filters-modal-lists-row {
+    layout: grid;
+    grid-size: 2 1;
+    grid-columns: 1fr 1fr;
+    grid-gutter: 1 0;
+    width: 1fr;
+    height: 1fr;
+    min-height: 10;
+    margin-bottom: 1;
+}
+
+.impact-filters-modal-list-column {
+    width: 1fr;
+    min-width: 0;
+    height: 1fr;
+    min-height: 0;
+}
+
+.impact-filters-modal-list {
+    width: 1fr;
+    height: 1fr;
+    min-height: 8;
+    margin-bottom: 1;
+    border: round $surface-lighten-1 40%;
+    background: $surface-darken-1 22%;
+}
+
+.impact-filters-modal-list-actions {
+    layout: grid;
+    grid-size: 2 1;
+    grid-columns: 1fr 1fr;
+    grid-gutter: 2 0;
+    padding: 0 1;
+    width: 1fr;
+}
+
+.impact-filters-modal-list-actions > CustomButton {
+    width: 1fr;
+    min-width: 0;
+    max-width: 100%;
+    margin-right: 1;
+}
+
+.impact-filters-modal-list-actions > CustomButton:last-child {
+    margin-right: 0;
+}
+
+.impact-filters-modal-actions {
+    margin-top: 0;
 }

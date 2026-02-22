@@ -319,52 +319,6 @@ def navigate_to_recommendations(app: App) -> None:
     app.push_screen(OptimizerScreen(initial_view="recommendations"))
 
 
-def navigate_to_charts_explorer(
-    app: App,
-    initial_view: Any = None,
-    initial_sort: Any = None,
-    testing: bool = False,
-) -> None:
-    """Navigate to charts explorer screen.
-
-    Args:
-        app: The Textual app instance.
-        initial_view: Optional ViewFilter to set on open.
-        initial_sort: Optional SortBy to set on open.
-        testing: If True, creates screen in testing mode (skips worker).
-    """
-    from kubeagle.screens.charts_explorer import ChartsExplorerScreen
-
-    app.push_screen(
-        ChartsExplorerScreen(
-            initial_view=initial_view,
-            initial_sort=initial_sort,
-            testing=testing,
-        )
-    )
-
-
-def navigate_to_chart_detail(
-    app: App,
-    chart: Any,
-    chart_list: list | None = None,
-    chart_index: int = 0,
-) -> None:
-    """Navigate to chart detail screen.
-
-    Args:
-        app: The Textual app instance.
-        chart: The chart to show details for.
-        chart_list: Optional list of charts for next/prev navigation.
-        chart_index: Index of the current chart in the list.
-    """
-    from kubeagle.screens.detail import ChartDetailScreen
-
-    app.push_screen(
-        ChartDetailScreen(chart, chart_list=chart_list, chart_index=chart_index)
-    )
-
-
 # ============================================================================
 # SCREEN BINDINGS
 # ============================================================================
@@ -505,53 +459,23 @@ CHARTS_EXPLORER_SCREEN_BINDINGS: list[
     ("?", "show_help", "Help"),
 ]
 
-OPTIMIZER_SCREEN_BINDINGS: list[
-    Annotated[tuple[str, str, str], "key, action, description"]
-] = [
-    ("escape", "pop_screen", "Back"),
-    ("r", "refresh", "Refresh"),
-    ("h", "nav_home", "Summary"),
-    ("?", "show_help", "Help"),
-    ("slash", "focus_search", "Search"),
-    # View switching
-    ("1", "view_violations", "Violations"),
-    ("2", "view_recommendations", "Recs"),
-    # Violations-specific
-    ("a", "apply_all", "Apply All"),
-    ("f", "fix_violation", "Fix"),
-    ("p", "preview_fix", "Preview"),
-    ("y", "copy_yaml", "Copy YAML"),
-    # Recommendations-specific
-    ("s", "focus_sort", "Sort"),
-    ("S", "focus_sort", "Sort"),
-    ("v", "cycle_severity", "Severity"),
-    ("g", "go_to_chart", "Go to Chart"),
-    # Cross-navigation
-    ("C", "nav_charts", "Charts"),
-    ("e", "nav_export", "Export"),
-    ("ctrl+s", "nav_settings", "Settings"),
-]
-
 __all__ = [
-    # Screen Navigator
-    "ScreenNavigator",
-    # Navigation functions
-    "navigate_to_home",
-    "navigate_to_cluster",
-    "navigate_to_charts",
-    "navigate_to_optimizer",
-    "navigate_to_export",
-    "navigate_to_settings",
-    "navigate_to_recommendations",
-    "navigate_to_charts_explorer",
-    "navigate_to_chart_detail",
     # Screen bindings
     "BASE_SCREEN_BINDINGS",
     "CHARTS_EXPLORER_SCREEN_BINDINGS",
-    "CLUSTER_SCREEN_BINDINGS",
-    "WORKLOADS_SCREEN_BINDINGS",
-    "SETTINGS_SCREEN_BINDINGS",
-    "REPORT_EXPORT_SCREEN_BINDINGS",
     "CHART_DETAIL_SCREEN_BINDINGS",
-    "OPTIMIZER_SCREEN_BINDINGS",
+    "CLUSTER_SCREEN_BINDINGS",
+    "REPORT_EXPORT_SCREEN_BINDINGS",
+    "SETTINGS_SCREEN_BINDINGS",
+    "WORKLOADS_SCREEN_BINDINGS",
+    # Screen Navigator
+    "ScreenNavigator",
+    "navigate_to_charts",
+    "navigate_to_cluster",
+    "navigate_to_export",
+    # Navigation functions
+    "navigate_to_home",
+    "navigate_to_optimizer",
+    "navigate_to_recommendations",
+    "navigate_to_settings",
 ]

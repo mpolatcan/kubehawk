@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from kubeagle.models.state.config_manager import (
     AppSettings,
@@ -15,9 +15,6 @@ from kubeagle.optimizer.full_ai_fixer import (
     is_default_full_fix_system_prompt_template,
     validate_full_fix_prompt_template,
 )
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 

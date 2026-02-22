@@ -251,7 +251,7 @@ class TestFormatViolationRow:
 # =============================================================================
 
 __all__ = [
-    "TestDetailConfigTabIDs",
     "TestDetailConfigColumns",
+    "TestDetailConfigTabIDs",
     "TestFormatViolationRow",
 ]

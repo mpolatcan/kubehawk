@@ -208,8 +208,18 @@ Switch {
     }
 }
 
-/* Global scrollbar standards for both horizontal and vertical axes */
-* {
+/* Scrollbar styling for scrollable widgets */
+DataTable,
+RichLog,
+ScrollableContainer,
+VerticalScroll,
+Screen,
+TabbedContent,
+ContentSwitcher,
+ListView,
+OptionList,
+TextArea,
+Markdown {
     scrollbar-size-horizontal: 1;
     scrollbar-size-vertical: 2;
     scrollbar-background: $surface-darken-2;

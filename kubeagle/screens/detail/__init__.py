@@ -14,13 +14,13 @@ from kubeagle.screens.detail.config import (
 )
 
 __all__ = [
-    "ChartDetailScreen",
-    "OptimizerScreen",
-    "TAB_VIOLATIONS",
+    "FIXES_TABLE_COLUMNS",
     "TAB_FIXES",
     "TAB_TITLES",
+    "TAB_VIOLATIONS",
     "VIOLATIONS_TABLE_COLUMNS",
-    "FIXES_TABLE_COLUMNS",
+    "ChartDetailScreen",
+    "OptimizerScreen",
 ]
 
 

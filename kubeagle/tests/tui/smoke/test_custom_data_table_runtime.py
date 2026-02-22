@@ -380,7 +380,7 @@ class TestDataTableOperations:
 
                     # Perform sort
                     if data_table.columns:
-                        first_column_key = list(data_table.columns.keys())[0]
+                        first_column_key = next(iter(data_table.columns.keys()))
                         data_table.sort(first_column_key)
                         await pilot.pause()
                         logger.info("Sort operation completed")

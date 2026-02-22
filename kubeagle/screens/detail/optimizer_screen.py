@@ -65,7 +65,7 @@ class OptimizerScreen(ChartsExplorerScreen):
 
 
 __all__ = [
-    "OptimizerScreen",
-    "OptimizerDataLoaded",
     "OptimizerDataLoadFailed",
+    "OptimizerDataLoaded",
+    "OptimizerScreen",
 ]

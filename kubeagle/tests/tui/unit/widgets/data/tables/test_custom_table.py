@@ -20,9 +20,6 @@ from textual.widgets import DataTable
 from kubeagle.widgets.data.tables.custom_table import (
     CustomTableBase,
     CustomTableMixin,
-    get_sort_indicator,
-    parse_sort_indicator,
-    sort_rows,
 )
 
 # =============================================================================
@@ -184,100 +181,6 @@ class TestCustomTableMixin:
     def test_custom_table_mixin_is_custom_table_base(self) -> None:
         """Test CustomTableMixin is alias for CustomTableBase."""
         assert CustomTableMixin is CustomTableBase
-
-
-# =============================================================================
-# Sort Utility Function Tests
-# =============================================================================
-
-
-@pytest.mark.unit
-@pytest.mark.fast
-class TestSortRows:
-    """Tests for sort_rows utility function."""
-
-    def test_sort_rows_empty_list(self) -> None:
-        """Test sorting empty list returns empty list."""
-        result = sort_rows([], "name", [], set())
-        assert result == []
-
-    def test_sort_rows_single_column(self) -> None:
-        """Test sorting by single column."""
-        rows = [("b", 2), ("a", 1), ("c", 3)]
-        column_defs = [("Name", "name"), ("Value", "value")]
-        result = sort_rows(rows, "name", column_defs, set())
-        assert result == [("a", 1), ("b", 2), ("c", 3)]
-
-    def test_sort_rows_numeric_column(self) -> None:
-        """Test sorting numeric column."""
-        rows = [("b", 3), ("a", 1), ("c", 2)]
-        column_defs = [("Name", "name"), ("Value", "value")]
-        result = sort_rows(rows, "value", column_defs, {"value"})
-        assert result == [("a", 1), ("c", 2), ("b", 3)]
-
-    def test_sort_rows_reverse(self) -> None:
-        """Test sorting in reverse order."""
-        rows = [("a", 1), ("b", 2), ("c", 3)]
-        column_defs = [("Name", "name")]
-        result = sort_rows(rows, "name", column_defs, set(), reverse=True)
-        assert result == [("c", 3), ("b", 2), ("a", 1)]
-
-    def test_sort_rows_invalid_column(self) -> None:
-        """Test sorting by invalid column returns original."""
-        rows = [("a", 1), ("b", 2)]
-        column_defs = [("Name", "name")]
-        result = sort_rows(rows, "invalid", column_defs, set())
-        assert result == [("a", 1), ("b", 2)]
-
-
-@pytest.mark.unit
-@pytest.mark.fast
-class TestGetSortIndicator:
-    """Tests for get_sort_indicator utility function."""
-
-    def test_get_sort_indicator_no_sort(self) -> None:
-        """Test indicator when no column is sorted."""
-        result = get_sort_indicator(None, "name", False)
-        assert result == ""
-
-    def test_get_sort_indicator_different_column(self) -> None:
-        """Test indicator when different column is sorted."""
-        result = get_sort_indicator("other", "name", False)
-        assert result == ""
-
-    def test_get_sort_indicator_ascending(self) -> None:
-        """Test indicator for ascending sort."""
-        result = get_sort_indicator("name", "name", False)
-        assert result == " [+]"
-
-    def test_get_sort_indicator_descending(self) -> None:
-        """Test indicator for descending sort."""
-        result = get_sort_indicator("name", "name", True)
-        assert result == " [-]"
-
-
-@pytest.mark.unit
-@pytest.mark.fast
-class TestParseSortIndicator:
-    """Tests for parse_sort_indicator utility function."""
-
-    def test_parse_sort_indicator_no_indicator(self) -> None:
-        """Test parsing label without indicator."""
-        label, reverse = parse_sort_indicator("name")
-        assert label == "name"
-        assert reverse is None
-
-    def test_parse_sort_indicator_ascending(self) -> None:
-        """Test parsing label with ascending indicator."""
-        label, reverse = parse_sort_indicator("name [+]")
-        assert label == "name"
-        assert reverse is False
-
-    def test_parse_sort_indicator_descending(self) -> None:
-        """Test parsing label with descending indicator."""
-        label, reverse = parse_sort_indicator("name [-]")
-        assert label == "name"
-        assert reverse is True
 
 
 # =============================================================================

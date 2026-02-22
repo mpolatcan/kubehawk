@@ -1147,7 +1147,7 @@ class _WorkloadAssignedNodesDetailModal(ModalScreen[None]):
             if x_values and y_values:
                 tick_count = min(6, len(x_values))
                 if tick_count > 0:
-                    tick_indexes = [int(round(i * (len(x_values) - 1) / (tick_count - 1))) for i in range(tick_count)] if tick_count > 1 else [0]
+                    tick_indexes = [round(i * (len(x_values) - 1) / (tick_count - 1)) for i in range(tick_count)] if tick_count > 1 else [0]
                     tick_indexes = sorted(set(tick_indexes))
                     tick_values = [x_values[index] for index in tick_indexes]
                     tick_labels = [
@@ -1217,20 +1217,20 @@ class WorkloadsScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scr
             ("Without PDB", "without_pdb"),
         )
         self._pdb_filter_values: set[str] = set()
-        self._loading_message = "Idle"
         self._load_progress = 0
         self._partial_refresh_scheduled = False
         self._partial_refresh_timer: object | None = None
         self._last_partial_refresh_at_monotonic: float = 0.0
         self._last_partial_refresh_row_count = 0
         self._reload_on_resume = False
+        self._render_on_resume = False
         self._initialized_table_ids: set[str] = set()
         self._table_column_names_by_id: dict[str, tuple[str, ...]] = {}
         self._row_workload_map_by_table: dict[str, dict[int, Any]] = {}
+        self._table_content_sig_by_id: dict[str, tuple] = {}
         self._last_streamed_row_count = 0
         self._stream_overlay_released = False
         self._is_loading = False
-        self._error_message: str | None = None
         self._loading_overlay_failsafe_timer: object | None = None
         self._search_debounce_timer: object | None = None
         self._resume_reload_timer: object | None = None
@@ -1419,6 +1419,15 @@ class WorkloadsScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scr
     def on_screen_resume(self) -> None:
         self.app.title = "KubEagle - Workloads"
         self._set_primary_navigation_tab(MAIN_NAV_TAB_WORKLOADS)
+        if self._render_on_resume:
+            self._render_on_resume = False
+            if not self._presenter.is_loading and self._has_existing_workloads_data():
+                # Worker finished while away — just refresh display
+                self._refresh_active_tab()
+            elif not self._presenter.is_loading:
+                # Failed — reload
+                self._start_load_worker(message="Loading workloads...")
+            # else: still loading, message handler will deliver
         if self._reload_on_resume:
             self._schedule_resume_reload_check(immediate=True)
 
@@ -1433,9 +1442,8 @@ class WorkloadsScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scr
         self._stop_search_debounce_timer()
         self._stop_resume_reload_timer()
         if self._presenter.is_loading:
-            self._reload_on_resume = True
-            with suppress(Exception):
-                self.workers.cancel_all()
+            # Keep workers alive in background, render on resume if finished.
+            self._render_on_resume = True
         if self._is_loading:
             self._is_loading = False
             self._stream_overlay_released = True
@@ -1448,8 +1456,8 @@ class WorkloadsScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scr
         force_refresh: bool = False,
         message: str = "Loading workloads...",
     ) -> None:
-        self._error_message = None
         self._reload_on_resume = False
+        self._table_content_sig_by_id.clear()
         self._partial_refresh_scheduled = False
         self._stop_partial_refresh_timer()
         self._stop_resume_reload_timer()
@@ -1652,7 +1660,6 @@ class WorkloadsScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scr
         is_error: bool = False,
     ) -> None:
         self._load_progress = max(0, min(progress, 100))
-        self._loading_message = message
         with suppress(NoMatches):
             label = self.query_one("#workloads-loading-text", CustomStatic)
             label.update(f"{self._load_progress}% - {message}")
@@ -1693,41 +1700,35 @@ class WorkloadsScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scr
         }
 
     def _refresh_filter_options(self) -> None:
-        workloads = list(self._presenter.get_all_workloads())
-        names = sorted(
-            {
-                str(getattr(workload, "name", "")).strip()
-                for workload in workloads
-                if str(getattr(workload, "name", "")).strip()
-            }
-        )
-        kinds = sorted(
-            {
-                str(getattr(workload, "kind", "")).strip()
-                for workload in workloads
-                if str(getattr(workload, "kind", "")).strip()
-            }
-        )
-        with_helm_count = sum(
-            1
-            for workload in workloads
-            if (str(getattr(workload, "helm_release", "") or "").strip() or "-") != "-"
-        )
+        workloads = self._presenter.get_all_workloads()
+        # Single-pass extraction of all filter facets to avoid iterating
+        # the workload list 5+ times.
+        name_set: set[str] = set()
+        kind_set: set[str] = set()
+        namespace_set: set[str] = set()
+        status_set: set[str] = set()
+        with_helm_count = 0
+        for workload in workloads:
+            name = str(getattr(workload, "name", "")).strip()
+            if name:
+                name_set.add(name)
+            kind = str(getattr(workload, "kind", "")).strip()
+            if kind:
+                kind_set.add(kind)
+            namespace = str(getattr(workload, "namespace", "")).strip()
+            if namespace:
+                namespace_set.add(namespace)
+            status = str(getattr(workload, "status", "")).strip()
+            if status:
+                status_set.add(status)
+            helm_release = str(getattr(workload, "helm_release", "") or "").strip()
+            if helm_release:
+                with_helm_count += 1
         without_helm_count = len(workloads) - with_helm_count
-        namespaces = sorted(
-            {
-                str(getattr(workload, "namespace", "")).strip()
-                for workload in workloads
-                if str(getattr(workload, "namespace", "")).strip()
-            }
-        )
-        statuses = sorted(
-            {
-                str(getattr(workload, "status", "")).strip()
-                for workload in workloads
-                if str(getattr(workload, "status", "")).strip()
-            }
-        )
+        names = sorted(name_set)
+        kinds = sorted(kind_set)
+        namespaces = sorted(namespace_set)
+        statuses = sorted(status_set)
 
         self._name_filter_options = tuple((value, value) for value in names)
         self._kind_filter_options = tuple((value, value) for value in kinds)
@@ -1885,6 +1886,10 @@ class WorkloadsScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scr
     def _refresh_active_tab(self) -> None:
         filter_kwargs = self._current_filter_kwargs()
         active_view_filter = self._active_view_filter()
+        # When there is no search query, the filtered list IS the scoped total,
+        # so we can skip the separate get_scoped_workload_count call that would
+        # re-run _filter_workloads a second time.
+        has_search = bool(self._search_query)
         filtered_workloads = self._presenter.get_filtered_workloads(
             workload_view_filter=active_view_filter,
             search_query=self._search_query,
@@ -1892,10 +1897,13 @@ class WorkloadsScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scr
             descending=self._sort_desc,
             **filter_kwargs,
         )
-        scoped_total = self._presenter.get_scoped_workload_count(
-            workload_view_filter=active_view_filter,
-            **filter_kwargs,
-        )
+        if has_search:
+            scoped_total = self._presenter.get_scoped_workload_count(
+                workload_view_filter=active_view_filter,
+                **filter_kwargs,
+            )
+        else:
+            scoped_total = len(filtered_workloads)
         self._refresh_summary(
             filtered_workloads=filtered_workloads,
             scoped_total=scoped_total,
@@ -1968,6 +1976,24 @@ class WorkloadsScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scr
                 descending=self._sort_desc,
                 **filter_kwargs,
             )
+
+        # Skip the expensive clear+rebuild if the table already shows the same rows.
+        # Use workload identity keys (namespace, kind, name) instead of id(w)
+        # because streaming recreates the list with new object references even
+        # when the actual workloads haven't changed.
+        content_sig = (
+            len(filtered_workloads),
+            tuple(self._workload_identity_key(w) for w in filtered_workloads),
+            column_names,
+            self._sort_by,
+            self._sort_desc,
+        )
+        if (
+            table_id in self._initialized_table_ids
+            and content_sig == self._table_content_sig_by_id.get(table_id)
+        ):
+            return
+
         rows = self._presenter.format_workload_rows(
             filtered_workloads,
             columns=columns,
@@ -2016,6 +2042,7 @@ class WorkloadsScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scr
                     table.clear(columns=False)
                 if rows:
                     table.add_rows(rows)
+            self._table_content_sig_by_id[table_id] = content_sig
             if selected_identity is not None:
                 restored_index = identity_to_index.get(selected_identity)
                 if restored_index is not None:
@@ -2032,7 +2059,8 @@ class WorkloadsScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scr
                 tabs.active = tab_id
         with suppress(NoMatches):
             self.query_one("#workloads-content-switcher", ContentSwitcher).current = tab_id
-        self._refresh_active_tab()
+        # Defer table rebuild so the tab switch renders immediately
+        self.call_later(self._refresh_active_tab)
 
     @on(CustomTabs.TabActivated, "#workloads-view-tabs")
     def _on_view_tab_activated(self, event: CustomTabs.TabActivated) -> None:
@@ -2234,7 +2262,6 @@ class WorkloadsScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scr
         self._is_loading = False
         self._partial_refresh_scheduled = False
         self._stop_partial_refresh_timer()
-        self._error_message = event.error
         self._stop_loading_overlay_failsafe_timer()
         self.show_loading_overlay(event.error, is_error=True, allow_cached_passthrough=False)
         self._set_load_progress(

@@ -504,11 +504,11 @@ def _allowed_template_files(chart_dir: Path) -> list[str]:
     templates_dir = chart_dir / "templates"
     if not templates_dir.exists():
         return []
-    files = []
-    for path in sorted(templates_dir.rglob("*")):
-        if path.is_file() and path.suffix.lower() in {".yaml", ".yml", ".tpl"}:
-            files.append(str(path.relative_to(chart_dir)))
-    return files
+    return [
+        str(path.relative_to(chart_dir))
+        for path in sorted(templates_dir.rglob("*"))
+        if path.is_file() and path.suffix.lower() in {".yaml", ".yml", ".tpl"}
+    ]
 
 
 def _build_direct_edit_prompt(

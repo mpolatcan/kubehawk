@@ -493,11 +493,11 @@ REC_CATEGORY_FILTERS: list[str] = ["all", "eks", "reliability", "resource"]
 
 
 __all__ = [
-    "OptimizerDataLoaded",
+    "REC_CATEGORY_FILTERS",
+    "REC_SEVERITY_FILTERS",
     "OptimizerDataLoadFailed",
+    "OptimizerDataLoaded",
     "build_helm_recommendations",
     "get_cluster_recommendations",
     "truncated_list",
-    "REC_SEVERITY_FILTERS",
-    "REC_CATEGORY_FILTERS",
 ]

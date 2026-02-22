@@ -555,26 +555,6 @@ class EKSHelmReporterApp(App[None]):
             )
         )
 
-    def action_nav_charts_by_values_file(self) -> None:
-        """Navigate to charts explorer sorted by values file."""
-        if self._block_actions_for_unsupported_terminal():
-            return
-        self._prepare_current_screen_for_navigation()
-        from kubeagle.screens import ChartsExplorerScreen
-        from kubeagle.screens.charts_explorer.config import SortBy
-
-        self.push_screen(ChartsExplorerScreen(initial_sort=SortBy.VALUES_FILE))
-
-    def action_nav_charts_without_pdb(self) -> None:
-        """Navigate to charts explorer with Missing PDB filter."""
-        if self._block_actions_for_unsupported_terminal():
-            return
-        self._prepare_current_screen_for_navigation()
-        from kubeagle.screens import ChartsExplorerScreen
-        from kubeagle.screens.charts_explorer.config import ViewFilter
-
-        self.push_screen(ChartsExplorerScreen(initial_view=ViewFilter.NO_PDB))
-
     def action_show_help(self) -> None:
         """Show help dialog."""
         if self._block_actions_for_unsupported_terminal():
@@ -643,7 +623,4 @@ class EKSHelmReporterApp(App[None]):
 
 __all__ = [
     "EKSHelmReporterApp",
-    "ConfigError",
-    "ConfigLoadError",
-    "ConfigSaveError",
 ]

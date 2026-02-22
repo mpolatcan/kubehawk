@@ -63,7 +63,7 @@ EXPLORER_TABLE_COLUMNS: list[tuple[str, int]] = [
     ("Probes", 16),
     ("Affinity", 14),
     ("PDB", 6),
-    ("Chart Path", 44),
+    ("Chart Path", 52),
 ]
 
 EXPLORER_HEADER_TOOLTIPS: dict[str, str] = {

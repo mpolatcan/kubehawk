@@ -708,13 +708,13 @@ class TestAcceptanceCriteria:
 # =============================================================================
 
 __all__ = [
-    "TestBug1CustomTabbedContentInheritance",
+    "TestAcceptanceCriteria",
     "TestBug1CustomTabPaneInheritance",
+    "TestBug1CustomTabbedContentInheritance",
     "TestBug2NoDuplicateWidgetIDs",
     "TestBug3ColumnDuplicationFix",
     "TestBug4CSSHeightFix",
     "TestBug5MessageNamespaceFix",
     "TestBug6PodListComponentRetained",
     "TestNoRegressionSharedWidgets",
-    "TestAcceptanceCriteria",
 ]

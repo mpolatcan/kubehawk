@@ -3,12 +3,10 @@
 This module tests:
 - Initialization and properties
 - Data accessor methods
-- Health calculation methods (_calc_health, get_health_status, get_health_data)
-- Row formatting methods (get_node_rows, get_pod_rows, get_event_rows, etc.)
-- Text formatting methods (get_overview_text, get_health_text)
+- Health calculation methods (_calc_health, get_health_data)
+- Row formatting methods (get_node_rows, get_node_group_rows, get_stats_rows, etc.)
 - Percentage formatting (_format_pct)
 - Dict-input event handling branches
-- Tab population delegation (populate_all_tabs)
 - Message classes (ClusterDataLoaded, ClusterDataLoadFailed)
 - Edge cases (empty data, null values, boundary conditions)
 
@@ -144,23 +142,6 @@ def _make_mock_single_replica(
     wl.status = status
     wl.node_name = node_name
     return wl
-
-
-def _make_mock_node_resource(
-    name: str = "node-1",
-    cpu_requests: float = 1500.0,
-    cpu_allocatable: float = 4000.0,
-    memory_requests: float = 4_000_000_000.0,
-    memory_allocatable: float = 16_000_000_000.0,
-) -> MagicMock:
-    """Create a mock node resource with configurable attributes."""
-    nr = MagicMock()
-    nr.name = name
-    nr.cpu_requests = cpu_requests
-    nr.cpu_allocatable = cpu_allocatable
-    nr.memory_requests = memory_requests
-    nr.memory_allocatable = memory_allocatable
-    return nr
 
 
 def _make_presenter_with_full_data() -> tuple[ClusterPresenter, MockClusterScreen]:
@@ -366,16 +347,6 @@ class TestClusterPresenterDataAccessors:
         result = presenter.get_pdbs()
         assert len(result) == 1
 
-    def test_get_node_resources(self) -> None:
-        """Test get_node_resources returns node resources list."""
-        mock_screen = MockClusterScreen()
-        presenter = ClusterPresenter(mock_screen)
-
-        presenter._data["node_resources"] = [_make_mock_node_resource()]
-
-        result = presenter.get_node_resources()
-        assert len(result) == 1
-
     def test_get_node_groups(self) -> None:
         """Test get_node_groups returns node groups dict."""
         mock_screen = MockClusterScreen()
@@ -508,65 +479,6 @@ class TestClusterPresenterHealthMethods:
         count = presenter.count_blocking_pdbs()
         assert count == 1
 
-    def test_get_health_status_healthy(self) -> None:
-        """Test getting health status when cluster is healthy."""
-        mock_screen = MockClusterScreen()
-        presenter = ClusterPresenter(mock_screen)
-
-        presenter._data["nodes"] = [_make_mock_node(status="Ready")]
-        presenter._data["events"] = []
-        presenter._data["pdbs"] = []
-
-        status, issues = presenter.get_health_status()
-        assert "HEALTHY" in status
-        assert len(issues) == 0
-
-    def test_get_health_status_degraded(self) -> None:
-        """Test getting health status when cluster has issues."""
-        mock_screen = MockClusterScreen()
-        presenter = ClusterPresenter(mock_screen)
-
-        nodes = [_make_mock_node(f"n{i}", "Ready") for i in range(4)]
-        nodes.append(_make_mock_node("n5", "NotReady"))
-        presenter._data["nodes"] = nodes
-        presenter._data["events"] = [_make_mock_event("Warning")] * 3
-        presenter._data["pdbs"] = []
-
-        status, _issues = presenter.get_health_status()
-        assert "HEALTHY" in status or "DEGRADED" in status
-
-    def test_get_health_status_unhealthy(self) -> None:
-        """Test getting health status when cluster is unhealthy."""
-        mock_screen = MockClusterScreen()
-        presenter = ClusterPresenter(mock_screen)
-
-        presenter._data["nodes"] = [_make_mock_node(status="NotReady")]
-        presenter._data["events"] = [_make_mock_event("Error")] * 3
-        presenter._data["pdbs"] = [_make_mock_pdb(is_blocking=True)]
-
-        status, issues = presenter.get_health_status()
-        assert "UNHEALTHY" in status or len(issues) > 0
-
-    def test_get_sorted_events(self) -> None:
-        """Test getting events sorted by timestamp."""
-        import datetime
-
-        mock_screen = MockClusterScreen()
-        presenter = ClusterPresenter(mock_screen)
-
-        e1 = MagicMock()
-        e1.last_timestamp = datetime.datetime(2024, 1, 1, 12, 0, 0)
-        e2 = MagicMock()
-        e2.last_timestamp = datetime.datetime(2024, 1, 2, 12, 0, 0)
-        e3 = MagicMock()
-        e3.last_timestamp = datetime.datetime(2023, 12, 31, 12, 0, 0)
-
-        presenter._data["events"] = [e1, e2, e3]
-
-        result = presenter.get_sorted_events(limit=2)
-        assert len(result) == 2
-        assert result[0].last_timestamp > result[1].last_timestamp
-
 
 # =============================================================================
 # ClusterPresenter Row Formatting Tests
@@ -655,102 +567,6 @@ class TestClusterPresenterRowFormatting:
         assert rows[0][5] == "- (0m/-)"
         assert rows[0][6] == "- (0.00Gi/-)"
 
-    # --- get_pod_rows ---
-
-    def test_get_pod_rows(self) -> None:
-        """Test get_pod_rows (alias for get_pod_dist_stats_rows) returns (metric, value) tuples."""
-        mock_screen = MockClusterScreen()
-        presenter = ClusterPresenter(mock_screen)
-
-        mock_dist = MagicMock()
-        mock_dist.total_pods = 100
-        mock_dist.min_pods_per_node = 5
-        mock_dist.avg_pods_per_node = 25.0
-        mock_dist.max_pods_per_node = 50
-        mock_dist.p95_pods_per_node = 45.0
-        presenter._data["pod_distribution"] = mock_dist
-
-        rows = presenter.get_pod_rows()
-        assert len(rows) == 5
-        assert rows[0] == ("Total Pods", "100")
-
-    def test_get_pod_rows_empty(self) -> None:
-        """Test get_pod_rows with no pod_distribution returns empty list."""
-        mock_screen = MockClusterScreen()
-        presenter = ClusterPresenter(mock_screen)
-
-        rows = presenter.get_pod_rows()
-        assert rows == []
-
-    # --- get_event_rows ---
-
-    def test_get_event_rows_dict_input(self) -> None:
-        """Test get_event_rows with dict input returns formatted rows."""
-        mock_screen = MockClusterScreen()
-        presenter = ClusterPresenter(mock_screen)
-
-        presenter._data["events"] = {"Warning": 5, "Normal": 3}
-
-        rows = presenter.get_event_rows()
-        assert len(rows) == 2
-
-        # Sorted by count descending
-        assert "5" in rows[0][1]
-        assert "3" in rows[1][1]
-
-        # Warning should be red
-        assert "[#ff3b30]Warning[/#ff3b30]" in rows[0][0]
-
-    def test_get_event_rows_list_input(self) -> None:
-        """Test get_event_rows with list input returns empty list (dict-only handler)."""
-        mock_screen = MockClusterScreen()
-        presenter = ClusterPresenter(mock_screen)
-
-        presenter._data["events"] = [_make_mock_event("Warning"), _make_mock_event("Normal")]
-
-        rows = presenter.get_event_rows()
-        assert rows == []
-
-    # --- get_pdb_rows ---
-
-    def test_get_pdb_rows(self) -> None:
-        """Test get_pdb_rows returns correctly formatted tuples."""
-        mock_screen = MockClusterScreen()
-        presenter = ClusterPresenter(mock_screen)
-
-        presenter._data["pdbs"] = [
-            _make_mock_pdb("kube-system", "coredns-pdb", min_available=1, max_unavailable=None, is_blocking=False),
-            _make_mock_pdb("production", "api-pdb", min_available=None, max_unavailable=1, is_blocking=True),
-        ]
-
-        rows = presenter.get_pdb_rows()
-        assert len(rows) == 2
-
-        row0 = rows[0]
-        assert len(row0) == 10
-        assert "[#30d158]Healthy[/#30d158]" in row0[8]  # status
-        assert row0[2] == "1"  # min_available
-        assert row0[3] == "N/A"  # max_unavailable is None
-
-        row1 = rows[1]
-        assert "[bold #ff3b30]Blocking[/bold #ff3b30]" in row1[8]  # status
-        assert row1[2] == "N/A"  # min_available is None
-        assert row1[3] == "1"  # max_unavailable
-
-    def test_get_pdb_rows_null_fields(self) -> None:
-        """Test get_pdb_rows with None min/max shows N/A."""
-        mock_screen = MockClusterScreen()
-        presenter = ClusterPresenter(mock_screen)
-
-        presenter._data["pdbs"] = [
-            _make_mock_pdb(min_available=None, max_unavailable=None),
-        ]
-
-        rows = presenter.get_pdb_rows()
-        assert len(rows) == 1
-        assert rows[0][2] == "N/A"
-        assert rows[0][3] == "N/A"
-
     def test_get_pdb_coverage_summary_rows_uses_charts_overview(self) -> None:
         """Chart coverage rows should come from chart overview payload."""
         mock_screen = MockClusterScreen()
@@ -786,105 +602,6 @@ class TestClusterPresenterRowFormatting:
         assert values["Total Runtime Workloads"] == "2"
         assert values["Runtime Workloads with PDB"] == "1"
         assert "50.0%" in values["Runtime PDB Coverage"]
-
-    def test_get_all_workload_rows(self) -> None:
-        """Runtime inventory rows should expose expected 8-column tuple shape."""
-        mock_screen = MockClusterScreen()
-        presenter = ClusterPresenter(mock_screen)
-        presenter._data["all_workloads"] = [
-            SimpleNamespace(
-                namespace="default",
-                kind="Deployment",
-                name="api",
-                desired_replicas=2,
-                ready_replicas=2,
-                helm_release="rel-api",
-                has_pdb=True,
-                status="Ready",
-            ),
-            SimpleNamespace(
-                namespace="default",
-                kind="Job",
-                name="batch",
-                desired_replicas=1,
-                ready_replicas=1,
-                helm_release=None,
-                has_pdb=False,
-                status="Running",
-            ),
-        ]
-
-        rows = presenter.get_all_workload_rows()
-        assert len(rows) == 2
-        assert len(rows[0]) == 8
-        assert rows[0][0:3] == ("default", "Deployment", "api")
-        assert rows[0][5] == "rel-api"
-        assert "Yes" in rows[0][6]
-        assert "Ready" in rows[0][7]
-        assert rows[1][5] == "-"
-        assert "No" in rows[1][6]
-
-    # --- get_single_replica_rows ---
-
-    def test_get_single_replica_rows(self) -> None:
-        """Test get_single_replica_rows returns correctly formatted tuples."""
-        mock_screen = MockClusterScreen()
-        presenter = ClusterPresenter(mock_screen)
-
-        presenter._data["single_replica"] = [
-            _make_mock_single_replica("default", "my-app", "Deployment", "Ready", "node-1"),
-            _make_mock_single_replica("production", "api-svc", "StatefulSet", "NotReady", "node-2"),
-        ]
-
-        rows = presenter.get_single_replica_rows()
-        assert len(rows) == 2
-
-        row0 = rows[0]
-        assert len(row0) == 7
-        assert "[#ff9f0a]Ready[/#ff9f0a]" in row0[6]  # status at index 6
-
-        row1 = rows[1]
-        assert "[bold #ff3b30]NotReady[/bold #ff3b30]" in row1[6]  # status at index 6
-
-    def test_get_single_replica_rows_no_node_name(self) -> None:
-        """Test get_single_replica_rows with node_name=None still works."""
-        mock_screen = MockClusterScreen()
-        presenter = ClusterPresenter(mock_screen)
-
-        presenter._data["single_replica"] = [
-            _make_mock_single_replica(node_name=None),
-        ]
-
-        rows = presenter.get_single_replica_rows()
-        assert len(rows) == 1
-        assert len(rows[0]) == 7
-
-    # --- get_node_dist_rows ---
-
-    def test_get_node_dist_rows(self) -> None:
-        """Test get_node_dist_rows returns correctly formatted 3-tuples."""
-        mock_screen = MockClusterScreen()
-        presenter = ClusterPresenter(mock_screen)
-
-        presenter._data["az_distribution"] = {"us-east-1a": 3}
-        presenter._data["instance_type_distribution"] = {"m5.large": 2}
-
-        rows = presenter.get_node_dist_rows()
-        assert len(rows) == 2
-
-        row = rows[0]
-        assert len(row) == 3
-        assert row[0] == "Availability Zone"
-        assert row[1] == "us-east-1a"
-        assert row[2] == "3"
-
-    def test_get_node_dist_rows_zero_allocatable(self) -> None:
-        """Test get_node_dist_rows with empty data returns empty list."""
-        mock_screen = MockClusterScreen()
-        presenter = ClusterPresenter(mock_screen)
-
-        rows = presenter.get_node_dist_rows()
-        assert len(rows) == 0
 
     # --- get_node_group_rows ---
 
@@ -963,83 +680,6 @@ class TestClusterPresenterRowFormatting:
         assert "Nodes" in categories
         assert "PDBs" in categories
         assert "Workloads" in categories
-
-
-# =============================================================================
-# ClusterPresenter Text Formatting Tests
-# =============================================================================
-
-
-class TestClusterPresenterTextFormatting:
-    """Test ClusterPresenter get_overview_text() and get_health_text()."""
-
-    def test_get_overview_text(self) -> None:
-        """Test get_overview_text returns Rich markup with key data."""
-        presenter, _ = _make_presenter_with_full_data()
-
-        text = presenter.get_overview_text()
-        assert "prod-cluster" in text
-        assert "Nodes" in text
-        assert "Events" in text
-        assert "Pod Disruption Budgets" in text
-
-    def test_get_overview_text_with_not_ready_nodes(self) -> None:
-        """Test overview shows red warning for not-ready nodes."""
-        presenter, _ = _make_presenter_with_full_data()
-
-        text = presenter.get_overview_text()
-        # 1 of 3 nodes is NotReady
-        assert "#ff3b30" in text
-        assert "Not Ready" in text
-
-    def test_get_overview_text_with_single_replica(self) -> None:
-        """Test overview shows 'Review for HA' when single replica workloads exist."""
-        presenter, _ = _make_presenter_with_full_data()
-
-        text = presenter.get_overview_text()
-        assert "Review for HA" in text
-
-    def test_get_overview_text_all_protected(self) -> None:
-        """Test overview shows 'All protected' when no single replica workloads."""
-        mock_screen = MockClusterScreen()
-        presenter = ClusterPresenter(mock_screen)
-
-        presenter._data["cluster_name"] = "test"
-        presenter._data["nodes"] = [_make_mock_node(status="Ready")]
-        presenter._data["events"] = []
-        presenter._data["pdbs"] = []
-        presenter._data["single_replica"] = []
-
-        text = presenter.get_overview_text()
-        assert "All protected" in text
-
-    def test_get_health_text(self) -> None:
-        """Test get_health_text for a healthy cluster."""
-        mock_screen = MockClusterScreen()
-        presenter = ClusterPresenter(mock_screen)
-
-        presenter._data["nodes"] = [_make_mock_node(status="Ready")]
-        presenter._data["events"] = []
-        presenter._data["pdbs"] = []
-
-        text = presenter.get_health_text()
-        assert "HEALTHY" in text
-        assert "100" in text
-        assert "No issues" in text
-
-    def test_get_health_text_with_issues(self) -> None:
-        """Test get_health_text when cluster has issues."""
-        mock_screen = MockClusterScreen()
-        presenter = ClusterPresenter(mock_screen)
-
-        presenter._data["nodes"] = [_make_mock_node(status="NotReady")]
-        presenter._data["events"] = [_make_mock_event("Error")] * 5
-        presenter._data["pdbs"] = [_make_mock_pdb(is_blocking=True)]
-
-        text = presenter.get_health_text()
-        assert "Issues Detected" in text
-        # Should mention errors and blocking PDBs
-        assert "error" in text.lower() or "Error" in text
 
 
 # =============================================================================
@@ -1254,16 +894,6 @@ class TestClusterPresenterDictEventHandling:
         count = presenter.count_error_events()
         assert count == 2
 
-    def test_get_sorted_events_dict_input(self) -> None:
-        """Test get_sorted_events with dict input returns empty list."""
-        mock_screen = MockClusterScreen()
-        presenter = ClusterPresenter(mock_screen)
-
-        presenter._data["events"] = {"Warning": 5, "Error": 2}
-
-        result = presenter.get_sorted_events()
-        assert result == []
-
     def test_count_warning_events_dict_no_warning(self) -> None:
         """Test count_warning_events with dict missing Warning key returns 0."""
         mock_screen = MockClusterScreen()
@@ -1326,39 +956,6 @@ class TestClusterPresenterTabDataMethods:
         assert "event_counts" in result
         assert result["total_nodes"] == 3
         assert result["ready_nodes"] == 2
-
-
-# =============================================================================
-# ClusterPresenter Populate All Tabs Tests
-# =============================================================================
-
-
-class TestClusterPresenterPopulateTabs:
-    """Test ClusterPresenter tab population delegation."""
-
-    def test_populate_all_tabs_calls_refresh_all_tabs(self) -> None:
-        """Test populate_all_tabs calls _refresh_all_tabs on the screen."""
-        mock_screen = MockClusterScreen()
-        mock_screen._refresh_all_tabs = MagicMock()  # type: ignore[assignment]
-        presenter = ClusterPresenter(mock_screen)
-
-        presenter.populate_all_tabs()
-
-        mock_screen._refresh_all_tabs.assert_called_once()  # type: ignore[union-attr]
-
-    def test_populate_all_tabs_no_refresh_method(self) -> None:
-        """Test populate_all_tabs gracefully handles missing _refresh_all_tabs."""
-
-        class ScreenWithoutRefresh:
-            """Screen mock that lacks _refresh_all_tabs method."""
-
-            app = MagicMock()
-            context = "test"
-
-        presenter = ClusterPresenter(ScreenWithoutRefresh())
-
-        # Should not raise
-        presenter.populate_all_tabs()
 
 
 # =============================================================================
@@ -1452,28 +1049,6 @@ class TestClusterPresenterEdgeCases:
 
         counts = presenter.count_events_by_type()
         assert isinstance(counts, dict)
-
-    def test_get_sorted_events_empty(self) -> None:
-        """Test getting sorted events when empty."""
-        mock_screen = MockClusterScreen()
-        presenter = ClusterPresenter(mock_screen)
-
-        presenter._data["events"] = []
-
-        result = presenter.get_sorted_events()
-        assert result == []
-
-    def test_get_health_status_no_nodes(self) -> None:
-        """Test getting health status when no nodes."""
-        mock_screen = MockClusterScreen()
-        presenter = ClusterPresenter(mock_screen)
-
-        presenter._data["nodes"] = []
-        presenter._data["events"] = []
-        presenter._data["pdbs"] = []
-
-        _status, issues = presenter.get_health_status()
-        assert "No nodes found" in issues[0]
 
     def test_get_overview_data_empty(self) -> None:
         """Test getting overview data when empty."""
@@ -1692,19 +1267,17 @@ class TestClusterPresenterPodStatsRows:
 # =============================================================================
 
 __all__ = [
-    "TestClusterPresenterInitialization",
-    "TestClusterPresenterProperties",
-    "TestClusterPresenterDataAccessors",
-    "TestClusterPresenterHealthMethods",
-    "TestClusterPresenterRowFormatting",
-    "TestClusterPresenterTextFormatting",
-    "TestClusterPresenterFormatPct",
     "TestClusterPresenterCalcHealth",
+    "TestClusterPresenterDataAccessors",
     "TestClusterPresenterDictEventHandling",
-    "TestClusterPresenterTabDataMethods",
-    "TestClusterPresenterPopulateTabs",
-    "TestClusterPresenterMessages",
-    "TestClusterPresenterLoadData",
     "TestClusterPresenterEdgeCases",
+    "TestClusterPresenterFormatPct",
+    "TestClusterPresenterHealthMethods",
+    "TestClusterPresenterInitialization",
+    "TestClusterPresenterLoadData",
+    "TestClusterPresenterMessages",
     "TestClusterPresenterPodStatsRows",
+    "TestClusterPresenterProperties",
+    "TestClusterPresenterRowFormatting",
+    "TestClusterPresenterTabDataMethods",
 ]

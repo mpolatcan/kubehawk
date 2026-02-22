@@ -63,7 +63,6 @@ SORT_SELECT_OPTIONS: list[tuple[str, str]] = [
 
 # Optimizer view switching
 VIEW_VIOLATIONS: str = "violations"
-VIEW_RECOMMENDATIONS: str = "recommendations"
 VIEW_IMPACT: str = "impact"
 VIEW_OPTIONS: list[tuple[str, str]] = [
     ("Optimizer", VIEW_VIOLATIONS),
@@ -108,33 +107,6 @@ IMPACT_CLUSTER_NODE_TABLE_COLUMNS: list[tuple[str, int]] = [
     ("Cost After/mo", 14),
     ("Cost Δ/mo", 14),
 ]
-
-IMPACT_HEADER_TOOLTIPS: dict[str, str] = {
-    "Instance Type": "Instance type from the live cluster or estimation.",
-    "vCPUs": "Number of virtual CPUs on the instance.",
-    "Memory": "Total memory on the instance.",
-    "Spot $/hr": "EC2 spot price per hour (us-east-1 approximate).",
-    "Nodes Before": "Estimated nodes required before optimization.",
-    "Nodes After": "Estimated nodes required after optimization.",
-    "Nodes": "Current number of nodes of this type in the cluster.",
-    "CPU/Node": "Allocatable CPU per node (millicores).",
-    "Mem/Node": "Allocatable memory per node.",
-    "Needed After": "Estimated nodes needed after applying optimizations.",
-    "Reduction": "Number of nodes saved by optimization.",
-    "%": "Percentage reduction in nodes.",
-    "Cost Before": "Estimated monthly spot cost before optimization.",
-    "Cost After": "Estimated monthly spot cost after optimization.",
-    "Cost Now/mo": "Current monthly spot cost for this node group.",
-    "Cost After/mo": "Estimated monthly spot cost after optimization.",
-    "Cost Δ/mo": "Monthly cost change: +$X = cost increase, -$X = cost saved.",
-    "Chart": "Helm chart name with resource changes.",
-    "Team": "Owning team of the chart.",
-    "CPU Req B->A": "CPU request per replica: before -> after.",
-    "CPU Lim B->A": "CPU limit per replica: before -> after.",
-    "Mem Req B->A": "Memory request per replica: before -> after.",
-    "Mem Lim B->A": "Memory limit per replica: before -> after.",
-    "Replicas": "Replica count: before -> after.",
-}
 
 # Fixes table columns
 FIXES_TABLE_COLUMNS: list[tuple[str, int]] = [

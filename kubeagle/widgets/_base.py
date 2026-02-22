@@ -148,23 +148,6 @@ class BaseWidget(Widget):
         return " ".join(c for c in class_names if c)
 
 
-class CompositeWidget(BaseWidget):
-    """Base class for widgets composed of multiple child widgets.
-
-    Provides common patterns for container-style widgets that manage
-    child widget lifecycle and state.
-
-    Example:
-        >>> class CardGroup(CompositeWidget):
-        ...     CSS_PATH = "css/widgets/card_group.tcss"
-        ...
-        ...     def __init__(self, items: list[str], **kwargs):
-        ...         super().__init__(**kwargs)
-        ...         self._items = items
-    """
-    pass
-
-
 class StatefulWidget(BaseWidget):
     """Base class for widgets with standardized reactive state management.
 

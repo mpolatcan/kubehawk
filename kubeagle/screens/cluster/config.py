@@ -56,20 +56,6 @@ NODE_TABLE_COLUMNS: list[tuple[str, int]] = [
     ("Mem Lim/Alloc (GiB)", 26),
 ]
 
-PODS_TABLE_COLUMNS: list[tuple[str, int]] = [
-    ("Name", 30),
-    ("Namespace", 20),
-    ("Chart", 20),
-    ("Version", 15),
-    ("Status", 12),
-]
-
-EVENTS_SUMMARY_TABLE_COLUMNS: list[tuple[str, int]] = [
-    ("Category", 25),
-    ("Count", 10),
-    ("Status", 10),
-]
-
 EVENTS_DETAIL_TABLE_COLUMNS: list[tuple[str, int]] = [
     ("Type", 10),
     ("Reason", 20),
@@ -91,22 +77,6 @@ PDBS_TABLE_COLUMNS: list[tuple[str, int]] = [
     ("Issues", 30),
 ]
 
-SINGLE_REPLICA_TABLE_COLUMNS: list[tuple[str, int]] = [
-    ("Namespace", 20),
-    ("Name", 30),
-    ("Kind", 15),
-    ("Replicas", 10),
-    ("Ready", 10),
-    ("Helm Release", 20),
-    ("Status", 15),
-]
-
-NODE_DIST_TABLE_COLUMNS: list[tuple[str, int]] = [
-    ("Category", 25),
-    ("Value", 25),
-    ("Count", 10),
-]
-
 NODE_GROUPS_TABLE_COLUMNS: list[tuple[str, int]] = [
     ("Node Group", 28),
     ("Nodes", 8),
@@ -114,12 +84,6 @@ NODE_GROUPS_TABLE_COLUMNS: list[tuple[str, int]] = [
     ("Mem Req % (Avg/Max/P95)", 24),
     ("CPU Lim % (Avg/Max/P95)", 24),
     ("Mem Lim % (Avg/Max/P95)", 24),
-]
-
-STATS_TABLE_COLUMNS: list[tuple[str, int]] = [
-    ("Category", 30),
-    ("Metric", 30),
-    ("Value", 20),
 ]
 
 # =============================================================================
@@ -183,34 +147,6 @@ CLUSTER_TABLE_HEADER_TOOLTIPS: dict[str, dict[str, str]] = {
         "Status": "Current workload status derived from runtime fields.",
     },
 }
-
-# =============================================================================
-# Widget ID Constants
-# =============================================================================
-
-# Table widget IDs
-NODES_TABLE_ID = "nodes-table"
-PODS_TABLE_ID = "pods-table"
-EVENTS_SUMMARY_TABLE_ID = "events-summary-table"
-PDBS_TABLE_ID = "pdbs-table"
-SINGLE_REPLICA_TABLE_ID = "single-replica-table"
-NODE_DIST_TABLE_ID = "node-dist-table"
-NODE_GROUPS_TABLE_ID = "node-groups-table"
-STATS_TABLE_ID = "cluster-stats-table"
-
-# Empty state widget IDs
-NODES_EMPTY_ID = "nodes-empty"
-PODS_EMPTY_ID = "pods-empty"
-EVENTS_EMPTY_ID = "events-empty"
-PDBS_EMPTY_ID = "pdbs-empty"
-SINGLE_REPLICA_EMPTY_ID = "single-replica-empty"
-NODE_DIST_EMPTY_ID = "node-dist-empty"
-NODE_GROUPS_EMPTY_ID = "node-groups-empty"
-STATS_EMPTY_ID = "stats-empty"
-
-# Backward-compatible aliases (tests import these)
-EVENTS_TABLE_COLUMNS = EVENTS_SUMMARY_TABLE_COLUMNS
-EVENTS_TABLE_ID = EVENTS_SUMMARY_TABLE_ID
 
 # Event limit
 MAX_EVENTS_DISPLAY = 100

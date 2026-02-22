@@ -7,6 +7,15 @@ Provides functions to parse Kubernetes resource strings into standardized format
 
 from typing import Any
 
+# Module-level constants to avoid re-creating on every function call.
+# Suffix multipliers for memory_str_to_bytes() to convert to bytes.
+_MEMORY_BYTES_MULTIPLIERS: tuple[tuple[str, int], ...] = (
+    ("Ki", 1024),
+    ("Mi", 1024**2),
+    ("Gi", 1024**3),
+    ("Ti", 1024**4),
+)
+
 
 def parse_cpu(cpu_str: str) -> float:
     """Parse CPU string to cores (float).
@@ -57,49 +66,6 @@ def parse_cpu(cpu_str: str) -> float:
         return 0.0
 
 
-def parse_memory(mem_str: str) -> float:
-    """Parse memory string to Mi (mebibytes).
-
-    Handles various memory resource formats:
-    - Ki: "1024Ki" -> 1.0 Mi
-    - Mi: "512Mi" -> 512.0 Mi
-    - Gi: "1Gi" -> 1024.0 Mi
-    - Ti: "1Ti" -> 1048576.0 Mi
-    - Plain bytes: "1048576" -> 1.0 Mi
-
-    Args:
-        mem_str: Memory value as string (e.g., "512Mi", "1Gi", "1024")
-
-    Returns:
-        Memory value in Mi as float. Returns 0.0 on parse error or empty string.
-    """
-    if not mem_str:
-        return 0.0
-
-    mem_str = str(mem_str).strip().lower()
-
-    # Suffix multipliers to convert to Mi
-    suffix_multipliers: dict[str, float] = {
-        "ki": 1 / 1024,
-        "mi": 1,
-        "gi": 1024,
-        "ti": 1024 * 1024,
-    }
-
-    for suffix, mult in suffix_multipliers.items():
-        if mem_str.endswith(suffix):
-            try:
-                return float(mem_str[:-2]) * mult
-            except ValueError:
-                return 0.0
-
-    # Handle plain bytes - convert to Mi
-    try:
-        return float(mem_str) / (1024 * 1024)
-    except ValueError:
-        return 0.0
-
-
 def memory_str_to_bytes(memory_str: str) -> float:
     """Convert memory string to bytes.
 
@@ -120,14 +86,7 @@ def memory_str_to_bytes(memory_str: str) -> float:
 
     memory_str = str(memory_str).strip()
 
-    multipliers = {
-        "Ki": 1024,
-        "Mi": 1024**2,
-        "Gi": 1024**3,
-        "Ti": 1024**4,
-    }
-
-    for suffix, mult in multipliers.items():
+    for suffix, mult in _MEMORY_BYTES_MULTIPLIERS:
         if memory_str.endswith(suffix):
             try:
                 value = float(memory_str[:-2])

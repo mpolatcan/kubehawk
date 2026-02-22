@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from kubeagle.constants.enums import NodeStatus
 from kubeagle.controllers.cluster.parsers.node_parser import NodeParser
 
 
@@ -38,42 +37,6 @@ class TestNodeParser:
             labels, ("eks.amazonaws.com/nodegroup", "alpha.eksctl.io/nodegroup-name")
         )
         assert result == "Unknown"
-
-    def test_parse_node_status_ready(self, parser: NodeParser) -> None:
-        """Test parse_node_status returns READY for ready node."""
-        status = {
-            "conditions": [
-                {"type": "Ready", "status": "True"},
-                {"type": "MemoryPressure", "status": "False"},
-            ]
-        }
-        result = parser.parse_node_status(status)
-        assert result == NodeStatus.READY
-
-    def test_parse_node_status_not_ready(self, parser: NodeParser) -> None:
-        """Test parse_node_status returns UNKNOWN for not ready node.
-
-        The parser only returns READY when Ready condition has status True,
-        otherwise it falls through to UNKNOWN.
-        """
-        status = {
-            "conditions": [
-                {"type": "Ready", "status": "False"},
-                {"type": "MemoryPressure", "status": "True"},
-            ]
-        }
-        result = parser.parse_node_status(status)
-        assert result == NodeStatus.UNKNOWN
-
-    def test_parse_node_status_no_ready_condition(self, parser: NodeParser) -> None:
-        """Test parse_node_status returns UNKNOWN when no Ready condition."""
-        status = {
-            "conditions": [
-                {"type": "MemoryPressure", "status": "True"},
-            ]
-        }
-        result = parser.parse_node_status(status)
-        assert result == NodeStatus.UNKNOWN
 
     def test_parse_node_info(self, parser: NodeParser) -> None:
         """Test parse_node_info creates NodeResourceInfo."""

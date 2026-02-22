@@ -430,32 +430,34 @@ class ResourceImpactCalculator:
         Groups nodes by instance_type, then estimates how many nodes of each
         type would be needed after optimization (proportional allocation).
         """
-        # Group nodes by instance type
+        # Single pass: group nodes by instance type and accumulate totals.
         groups: dict[str, list[Any]] = {}
+        group_cpu_totals: dict[str, float] = {}
+        group_mem_totals: dict[str, float] = {}
+        total_cluster_cpu = 0.0
+        total_cluster_mem = 0.0
+
         for node in cluster_nodes:
             itype = getattr(node, "instance_type", "") or "unknown"
             groups.setdefault(itype, []).append(node)
+            cpu_alloc = getattr(node, "cpu_allocatable", 0.0)
+            mem_alloc = getattr(node, "memory_allocatable", 0.0)
+            group_cpu_totals[itype] = group_cpu_totals.get(itype, 0.0) + cpu_alloc
+            group_mem_totals[itype] = group_mem_totals.get(itype, 0.0) + mem_alloc
+            total_cluster_cpu += cpu_alloc
+            total_cluster_mem += mem_alloc
 
         if not groups:
             return []
 
-        # Compute total cluster allocatable (for proportional split)
-        total_cluster_cpu = 0.0
-        total_cluster_mem = 0.0
-        for nodes in groups.values():
-            for n in nodes:
-                total_cluster_cpu += getattr(n, "cpu_allocatable", 0.0)
-                total_cluster_mem += getattr(n, "memory_allocatable", 0.0)
-
         result: list[ClusterNodeGroup] = []
         for itype, nodes in sorted(groups.items()):
             node_count = len(nodes)
-            # Average allocatable per node in this group
-            cpu_per_node = sum(getattr(n, "cpu_allocatable", 0.0) for n in nodes) / node_count
-            mem_per_node = sum(getattr(n, "memory_allocatable", 0.0) for n in nodes) / node_count
-
-            cpu_total = cpu_per_node * node_count
-            mem_total = mem_per_node * node_count
+            # Use pre-computed group totals instead of re-summing per group.
+            cpu_total = group_cpu_totals[itype]
+            mem_total = group_mem_totals[itype]
+            cpu_per_node = cpu_total / node_count
+            mem_per_node = mem_total / node_count
 
             # Usable capacity after overhead
             usable_cpu_per_node = cpu_per_node * (1 - overhead_pct)

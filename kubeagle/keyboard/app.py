@@ -23,18 +23,6 @@ APP_BINDINGS: list[Binding] = [
     Binding("q", "app.quit", "Quit", priority=True),
 ]
 
-# Keep tuple-based binding groups for compatibility with tooling and docs.
-GLOBAL_BINDINGS: list[tuple[str, str, str]] = [
-    (binding.key, binding.action, binding.description) for binding in APP_BINDINGS
-]
-NAV_BINDINGS: list[tuple[str, str, str]] = [("escape", "back", "Back")]
-HELP_BINDINGS: list[tuple[str, str, str]] = [("?", "show_help", "Help")]
-REFRESH_BINDINGS: list[tuple[str, str, str]] = [("r", "refresh", "Refresh")]
-
 __all__ = [
-    "GLOBAL_BINDINGS",
-    "NAV_BINDINGS",
-    "HELP_BINDINGS",
-    "REFRESH_BINDINGS",
     "APP_BINDINGS",
 ]

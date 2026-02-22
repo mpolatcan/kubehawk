@@ -29,13 +29,10 @@ from kubeagle.keyboard.navigation import (
     CHART_DETAIL_SCREEN_BINDINGS,
     CHARTS_EXPLORER_SCREEN_BINDINGS,
     CLUSTER_SCREEN_BINDINGS,
-    OPTIMIZER_SCREEN_BINDINGS,
     REPORT_EXPORT_SCREEN_BINDINGS,
     SETTINGS_SCREEN_BINDINGS,
     ScreenNavigator,
-    navigate_to_chart_detail,
     navigate_to_charts,
-    navigate_to_charts_explorer,
     navigate_to_cluster,
     navigate_to_export,
     navigate_to_home,
@@ -64,40 +61,37 @@ from kubeagle.screens.settings import SettingsScreen
 from kubeagle.screens.workloads import WorkloadsScreen
 
 __all__ = [
+    # Keybindings
+    "BASE_SCREEN_BINDINGS",
+    "CHARTS_EXPLORER_SCREEN_BINDINGS",
+    "CHART_DETAIL_SCREEN_BINDINGS",
+    "CLUSTER_SCREEN_BINDINGS",
+    "REPORT_EXPORT_SCREEN_BINDINGS",
+    "SETTINGS_SCREEN_BINDINGS",
     # Base
     "BaseScreen",
+    # Detail
+    "ChartDetailScreen",
     # Charts Explorer
     "ChartsExplorerScreen",
     # Cluster
     "ClusterScreen",
-    # Workloads
-    "WorkloadsScreen",
+    "OptimizerScreen",
     # Reports
     "ReportExportScreen",
-    # Detail
-    "ChartDetailScreen",
-    "OptimizerScreen",
-    # Settings
-    "SettingsScreen",
     # Navigation
     "ScreenNavigator",
-    "navigate_to_home",
-    "navigate_to_cluster",
+    # Settings
+    "SettingsScreen",
+    # Workloads
+    "WorkloadsScreen",
     "navigate_to_charts",
-    "navigate_to_charts_explorer",
-    "navigate_to_optimizer",
+    "navigate_to_cluster",
     "navigate_to_export",
-    "navigate_to_settings",
+    "navigate_to_home",
+    "navigate_to_optimizer",
     "navigate_to_recommendations",
-    "navigate_to_chart_detail",
-    # Keybindings
-    "BASE_SCREEN_BINDINGS",
-    "CLUSTER_SCREEN_BINDINGS",
-    "CHARTS_EXPLORER_SCREEN_BINDINGS",
-    "OPTIMIZER_SCREEN_BINDINGS",
-    "SETTINGS_SCREEN_BINDINGS",
-    "CHART_DETAIL_SCREEN_BINDINGS",
-    "REPORT_EXPORT_SCREEN_BINDINGS",
+    "navigate_to_settings",
 ]
 
 

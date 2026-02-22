@@ -72,27 +72,5 @@ class TabbedViewMixin:
         """Switch to tab 5."""
         self.switch_tab("tab-5")
 
-    def get_current_tab_id(self) -> str | None:
-        """Get the current active tab ID.
 
-        ``TabbedContent.active`` is a reactive ``str`` holding the id of the
-        currently active ``TabPane``.
-
-        Returns:
-            The ID string of the current tab pane, or None if not found.
-        """
-        try:
-            # Mixin requires DOMNode subclass which provides query_one
-            tabbed_content: CustomTabbedContent = self.query_one(  # type: ignore[unresolved-attribute]
-                "#tabbed-content", CustomTabbedContent
-            )
-            active = tabbed_content.active
-            return active if active else None
-        except Exception:
-            return None
-
-
-# Alias for backward compatibility
-FilterableTableMixin = TabbedViewMixin
-
-__all__ = ["TabbedViewMixin", "FilterableTableMixin"]
+__all__ = ["TabbedViewMixin"]

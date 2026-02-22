@@ -16,9 +16,7 @@ from kubeagle.constants.ui import (
     LIGHT_THEME,
     SEVERITIES,
     AppState,
-    FetchSources,
     FetchState,
-    LoadingState,
     NodeStatus,
     QoSClass,
     Severity,
@@ -36,14 +34,8 @@ class TestUIReExportedEnums:
     def test_app_state_is_enum(self) -> None:
         assert issubclass(AppState, Enum)
 
-    def test_fetch_sources_is_enum(self) -> None:
-        assert issubclass(FetchSources, Enum)
-
     def test_fetch_state_is_enum(self) -> None:
         assert issubclass(FetchState, Enum)
-
-    def test_loading_state_is_enum(self) -> None:
-        assert issubclass(LoadingState, Enum)
 
     def test_node_status_is_enum(self) -> None:
         assert issubclass(NodeStatus, Enum)

@@ -444,11 +444,11 @@ class TestFormatChartRow:
         assert row[4] == "Guaranteed"
 
     def test_last_column_is_chart_path(self) -> None:
-        """Test last column is chart path."""
+        """Test last column shows relative chart path with grandparent."""
         presenter = ChartsExplorerPresenter()
         chart = _make_chart(values_file="/repo/charts/my-chart/values.yaml")
         row = presenter.format_chart_row(chart)
-        assert row[11] == "/repo/charts/my-chart/values.yaml"
+        assert row[11] == "charts/my-chart/values.yaml"
 
     def test_cpu_req_lim_compact_formatted(self) -> None:
         """CPU request/limit should include inline ratio."""
@@ -716,10 +716,10 @@ class TestHelperMethods:
 # =============================================================================
 
 __all__ = [
-    "TestChartsExplorerPresenterInit",
     "TestApplyFilters",
-    "TestSorting",
-    "TestFormatChartRow",
     "TestBuildSummaryMetrics",
+    "TestChartsExplorerPresenterInit",
+    "TestFormatChartRow",
     "TestHelperMethods",
+    "TestSorting",
 ]

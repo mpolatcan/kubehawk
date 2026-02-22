@@ -8,7 +8,6 @@ import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -19,7 +18,6 @@ from kubeagle.constants.timeouts import CLUSTER_CHECK_TIMEOUT
 from kubeagle.controllers import ClusterController
 from kubeagle.models.events.event_summary import EventSummary
 from kubeagle.screens.cluster.config import (
-    MAX_EVENTS_DISPLAY,
     NODE_GROUPS_TABLE_COLUMNS,
     NODE_TABLE_COLUMNS,
 )
@@ -119,6 +117,7 @@ class ClusterPresenter:
         self._loaded_keys: set[str] = set()  # tracks which data keys have arrived
         self._event_window_hours = self._DEFAULT_EVENT_WINDOW_HOURS
         self._last_partial_emit_at: dict[str, float] = {}
+        self._last_emitted_counts: dict[str, int] = {}
         self._last_node_derived_emit_at = 0.0
 
     # =========================================================================
@@ -181,9 +180,6 @@ class ClusterPresenter:
 
     def get_pdbs(self) -> list:
         return self._data.get("pdbs", [])
-
-    def get_node_resources(self) -> list:
-        return self._data.get("node_resources", [])
 
     def get_node_groups(self) -> dict:
         return self._data.get("node_groups", {})
@@ -312,11 +308,17 @@ class ClusterPresenter:
     def _emit_partial_source_update(self, key: str, value: Any) -> None:
         """Store partial source value and trigger an incremental UI refresh."""
         self._data[key] = value
+        # Skip re-render when no new data has arrived since last emit.
+        current_count = len(value) if isinstance(value, (list, dict)) else 0
+        last_count = self._last_emitted_counts.get(key, -1)
+        if current_count <= last_count and current_count > 0:
+            return
         now = time.monotonic()
         last_emit_at = self._last_partial_emit_at.get(key, 0.0)
         if now - last_emit_at < self._PARTIAL_SOURCE_EMIT_INTERVAL_SECONDS:
             return
         self._last_partial_emit_at[key] = now
+        self._last_emitted_counts[key] = current_count
         if not bool(getattr(self._screen, "is_current", True)):
             return
         try:
@@ -398,196 +400,142 @@ class ClusterPresenter:
         self._data.update(derived_sources)
 
     def _build_derived_node_sources(self, nodes: list) -> dict[str, Any]:
-        """Build node-derived sources off the UI thread."""
-        return {
-            "node_conditions": self._derive_node_conditions(nodes),
-            "node_taints": self._derive_node_taints(nodes),
-            "az_distribution": self._derive_az_distribution(nodes),
-            "instance_type_distribution": self._derive_instance_type_distribution(nodes),
-            "kubelet_version_distribution": self._derive_kubelet_version_distribution(nodes),
-            "node_groups_az_matrix": self._derive_node_groups_az_matrix(nodes),
-            "node_groups": self._derive_node_groups(nodes),
-            "high_pod_count_nodes": self._derive_high_pod_count_nodes(nodes),
-        }
+        """Build all node-derived sources in a single pass over the node list.
 
-    @staticmethod
-    def _derive_node_conditions(nodes: list) -> dict[str, dict[str, int]]:
-        """Derive node condition counts from partial node list."""
-        condition_types = [
-            "Ready",
-            "MemoryPressure",
-            "DiskPressure",
-            "PIDPressure",
-            "NetworkUnavailable",
-        ]
+        Performance: previously 8 separate derivation functions each iterated
+        over all nodes (8*N iterations). Now a single pass collects all
+        accumulators simultaneously, reducing to 1*N + finalisation.
+        """
+        # --- accumulators ---
+        condition_types_set = {
+            "Ready", "MemoryPressure", "DiskPressure",
+            "PIDPressure", "NetworkUnavailable",
+        }
         conditions: dict[str, dict[str, int]] = {
             cond: {"True": 0, "False": 0, "Unknown": 0}
-            for cond in condition_types
+            for cond in condition_types_set
         }
-        for node in nodes:
-            for cond_type, status in getattr(node, "conditions", {}).items():
-                if cond_type in conditions:
-                    if status in conditions[cond_type]:
-                        conditions[cond_type][status] += 1
-                    else:
-                        conditions[cond_type]["Unknown"] += 1
-        return conditions
-
-    @staticmethod
-    def _derive_node_taints(nodes: list) -> dict[str, Any]:
-        """Derive taint distribution from partial node list."""
         nodes_with_taints = 0
         taint_distribution: dict[str, dict[str, Any]] = {}
+        az_counts: dict[str, int] = {}
+        instance_type_counts: dict[str, int] = {}
+        kubelet_counts: dict[str, int] = {}
+        ng_az_matrix: dict[str, dict[str, int]] = {}
+        ng_totals: dict[str, dict[str, float | int]] = {}
+        high_pod_nodes: list[dict[str, Any]] = []
+        _HIGH_POD_THRESHOLD_PCT = 80.0
+        _safe_float = self._safe_float
+
         for node in nodes:
+            # --- conditions ---
+            for cond_type, status in getattr(node, "conditions", {}).items():
+                if cond_type in conditions:
+                    bucket = conditions[cond_type]
+                    if status in bucket:
+                        bucket[status] += 1
+                    else:
+                        bucket["Unknown"] += 1
+
+            # --- taints ---
             taints = getattr(node, "taints", [])
             if taints:
                 nodes_with_taints += 1
-            for taint in taints:
-                key = taint.get("key", "")
-                effect = taint.get("effect", "Unknown")
-                taint_key = f"{key}={taint.get('value', '')}" if key else effect
-                if taint_key not in taint_distribution:
-                    taint_distribution[taint_key] = {"effect": effect, "count": 0}
-                taint_distribution[taint_key]["count"] += 1
-        return {
-            "total_nodes_with_taints": nodes_with_taints,
-            "taint_distribution": taint_distribution,
-        }
+                for taint in taints:
+                    key = taint.get("key", "")
+                    effect = taint.get("effect", "Unknown")
+                    taint_key = f"{key}={taint.get('value', '')}" if key else effect
+                    entry = taint_distribution.get(taint_key)
+                    if entry is None:
+                        taint_distribution[taint_key] = {"effect": effect, "count": 1}
+                    else:
+                        entry["count"] += 1
 
-    @staticmethod
-    def _derive_az_distribution(nodes: list) -> dict[str, int]:
-        """Derive AZ distribution from partial node list."""
-        counts: dict[str, int] = {}
-        for node in nodes:
-            az = getattr(node, "availability_zone", "")
+            # --- distributions ---
+            az = getattr(node, "availability_zone", "") or ""
+            instance_type = getattr(node, "instance_type", "") or ""
+            version = str(getattr(node, "kubelet_version", "") or "").lstrip("v")
+            ng = getattr(node, "node_group", "") or "Unknown"
+
             if az:
-                counts[az] = counts.get(az, 0) + 1
-        return counts
-
-    @staticmethod
-    def _derive_instance_type_distribution(nodes: list) -> dict[str, int]:
-        """Derive instance-type distribution from partial node list."""
-        counts: dict[str, int] = {}
-        for node in nodes:
-            instance_type = getattr(node, "instance_type", "")
+                az_counts[az] = az_counts.get(az, 0) + 1
             if instance_type:
-                counts[instance_type] = counts.get(instance_type, 0) + 1
-        return counts
-
-    @staticmethod
-    def _derive_kubelet_version_distribution(nodes: list) -> dict[str, int]:
-        """Derive kubelet-version distribution from partial node list."""
-        counts: dict[str, int] = {}
-        for node in nodes:
-            version = str(getattr(node, "kubelet_version", "")).lstrip("v")
+                instance_type_counts[instance_type] = instance_type_counts.get(instance_type, 0) + 1
             if version:
-                counts[version] = counts.get(version, 0) + 1
-        return counts
+                kubelet_counts[version] = kubelet_counts.get(version, 0) + 1
 
-    @staticmethod
-    def _derive_node_groups_az_matrix(nodes: list) -> dict[str, dict[str, int]]:
-        """Derive node-group/AZ matrix from partial node list."""
-        matrix: dict[str, dict[str, int]] = {}
-        for node in nodes:
-            ng = getattr(node, "node_group", "Unknown")
-            az = getattr(node, "availability_zone", "Unknown")
-            if ng not in matrix:
-                matrix[ng] = {}
-            matrix[ng][az] = matrix[ng].get(az, 0) + 1
-        return matrix
+            # --- node group AZ matrix ---
+            az_for_matrix = az or "Unknown"
+            ng_row = ng_az_matrix.get(ng)
+            if ng_row is None:
+                ng_az_matrix[ng] = {az_for_matrix: 1}
+            else:
+                ng_row[az_for_matrix] = ng_row.get(az_for_matrix, 0) + 1
 
-    def _derive_node_groups(self, nodes: list) -> dict[str, dict[str, Any]]:
-        """Derive node-group allocation summary from partial node list."""
-        node_groups: dict[str, dict[str, Any]] = {}
-        for node in nodes:
-            ng = getattr(node, "node_group", "Unknown")
-            if ng not in node_groups:
-                node_groups[ng] = {
-                    "cpu_allocatable": 0.0,
-                    "memory_allocatable": 0.0,
-                    "cpu_requests": 0.0,
-                    "memory_requests": 0.0,
-                    "cpu_limits": 0.0,
-                    "memory_limits": 0.0,
+            # --- node group allocations ---
+            group = ng_totals.get(ng)
+            if group is None:
+                group = {
+                    "cpu_allocatable": 0.0, "memory_allocatable": 0.0,
+                    "cpu_requests": 0.0, "memory_requests": 0.0,
+                    "cpu_limits": 0.0, "memory_limits": 0.0,
                     "node_count": 0,
                 }
-            node_groups[ng]["cpu_allocatable"] += self._safe_float(
-                getattr(node, "cpu_allocatable", 0.0)
-            )
-            node_groups[ng]["memory_allocatable"] += self._safe_float(
-                getattr(node, "memory_allocatable", 0.0)
-            )
-            node_groups[ng]["cpu_requests"] += self._safe_float(
-                getattr(node, "cpu_requests", 0.0)
-            )
-            node_groups[ng]["memory_requests"] += self._safe_float(
-                getattr(node, "memory_requests", 0.0)
-            )
-            node_groups[ng]["cpu_limits"] += self._safe_float(
-                getattr(node, "cpu_limits", 0.0)
-            )
-            node_groups[ng]["memory_limits"] += self._safe_float(
-                getattr(node, "memory_limits", 0.0)
-            )
-            node_groups[ng]["node_count"] += 1
+                ng_totals[ng] = group
+            group["cpu_allocatable"] += _safe_float(getattr(node, "cpu_allocatable", 0.0))
+            group["memory_allocatable"] += _safe_float(getattr(node, "memory_allocatable", 0.0))
+            group["cpu_requests"] += _safe_float(getattr(node, "cpu_requests", 0.0))
+            group["memory_requests"] += _safe_float(getattr(node, "memory_requests", 0.0))
+            group["cpu_limits"] += _safe_float(getattr(node, "cpu_limits", 0.0))
+            group["memory_limits"] += _safe_float(getattr(node, "memory_limits", 0.0))
+            group["node_count"] += 1
 
-        result: dict[str, dict[str, Any]] = {}
-        for ng, totals in node_groups.items():
-            cpu_pct = (
-                (totals["cpu_requests"] / totals["cpu_allocatable"] * 100)
-                if totals["cpu_allocatable"] > 0
-                else 0.0
-            )
-            mem_pct = (
-                (totals["memory_requests"] / totals["memory_allocatable"] * 100)
-                if totals["memory_allocatable"] > 0
-                else 0.0
-            )
-            cpu_lim_pct = (
-                (totals["cpu_limits"] / totals["cpu_allocatable"] * 100)
-                if totals["cpu_allocatable"] > 0
-                else 0.0
-            )
-            mem_lim_pct = (
-                (totals["memory_limits"] / totals["memory_allocatable"] * 100)
-                if totals["memory_allocatable"] > 0
-                else 0.0
-            )
-            result[ng] = {
-                "cpu_allocatable": totals["cpu_allocatable"],
-                "memory_allocatable": totals["memory_allocatable"],
+            # --- high pod count ---
+            pod_count_f = _safe_float(getattr(node, "pod_count", 0.0))
+            pod_capacity_f = _safe_float(getattr(node, "pod_capacity", 0.0))
+            pod_pct = (pod_count_f / pod_capacity_f * 100) if pod_capacity_f > 0 else 0.0
+            if pod_pct >= _HIGH_POD_THRESHOLD_PCT:
+                high_pod_nodes.append({
+                    "name": str(getattr(node, "name", "")),
+                    "node_group": str(ng),
+                    "pod_count": int(pod_count_f),
+                    "max_pods": int(pod_capacity_f),
+                    "pod_pct": pod_pct,
+                })
+
+        # --- finalise node_groups ---
+        node_groups_result: dict[str, dict[str, Any]] = {}
+        for ng_name, totals in ng_totals.items():
+            cpu_alloc = totals["cpu_allocatable"]
+            mem_alloc = totals["memory_allocatable"]
+            node_groups_result[ng_name] = {
+                "cpu_allocatable": cpu_alloc,
+                "memory_allocatable": mem_alloc,
                 "cpu_requests": totals["cpu_requests"],
                 "memory_requests": totals["memory_requests"],
                 "cpu_limits": totals["cpu_limits"],
                 "memory_limits": totals["memory_limits"],
-                "cpu_pct": cpu_pct,
-                "memory_pct": mem_pct,
-                "cpu_lim_pct": cpu_lim_pct,
-                "memory_lim_pct": mem_lim_pct,
+                "cpu_pct": (totals["cpu_requests"] / cpu_alloc * 100) if cpu_alloc > 0 else 0.0,
+                "memory_pct": (totals["memory_requests"] / mem_alloc * 100) if mem_alloc > 0 else 0.0,
+                "cpu_lim_pct": (totals["cpu_limits"] / cpu_alloc * 100) if cpu_alloc > 0 else 0.0,
+                "memory_lim_pct": (totals["memory_limits"] / mem_alloc * 100) if mem_alloc > 0 else 0.0,
                 "node_count": totals["node_count"],
             }
-        return result
 
-    def _derive_high_pod_count_nodes(self, nodes: list) -> list[dict[str, Any]]:
-        """Derive high pod-count nodes from partial node list."""
-        threshold_pct = 80.0
-        high_pod_nodes: list[dict[str, Any]] = []
-        for node in nodes:
-            pod_count = self._safe_float(getattr(node, "pod_count", 0.0))
-            pod_capacity = self._safe_float(getattr(node, "pod_capacity", 0.0))
-            pod_pct = (pod_count / pod_capacity * 100) if pod_capacity > 0 else 0.0
-            if pod_pct >= threshold_pct:
-                high_pod_nodes.append(
-                    {
-                        "name": str(getattr(node, "name", "")),
-                        "node_group": str(getattr(node, "node_group", "")),
-                        "pod_count": int(pod_count),
-                        "max_pods": int(pod_capacity),
-                        "pod_pct": pod_pct,
-                    }
-                )
         high_pod_nodes.sort(key=lambda item: item["pod_pct"], reverse=True)
-        return high_pod_nodes
+
+        return {
+            "node_conditions": conditions,
+            "node_taints": {
+                "total_nodes_with_taints": nodes_with_taints,
+                "taint_distribution": taint_distribution,
+            },
+            "az_distribution": az_counts,
+            "instance_type_distribution": instance_type_counts,
+            "kubelet_version_distribution": kubelet_counts,
+            "node_groups_az_matrix": ng_az_matrix,
+            "node_groups": node_groups_result,
+            "high_pod_count_nodes": high_pod_nodes,
+        }
 
     async def _load_streaming_pdbs(
         self,
@@ -871,6 +819,7 @@ class ClusterPresenter:
             self._partial_errors.clear()
             self._loaded_keys.clear()
             self._last_partial_emit_at.clear()
+            self._last_emitted_counts.clear()
             self._last_node_derived_emit_at = 0.0
 
             app = self._screen.app
@@ -878,9 +827,7 @@ class ClusterPresenter:
                 getattr(self._screen, "context", None)
                 or getattr(app, "context", None)
             )
-            current_context = await asyncio.to_thread(
-                ClusterController.resolve_current_context
-            )
+            current_context = await ClusterController.resolve_current_context_async()
             # Always prefer active kube context from local kubeconfig.
             context = current_context or configured_context
 
@@ -1143,21 +1090,9 @@ class ClusterPresenter:
 
         return label, int(score), issues
 
-    def get_health_status(self) -> tuple[str, list[str]]:
-        """Returns (status_str, issues_list)."""
-        label, _score, issues = self._calc_health()
-        return label, issues
-
     def get_health_data(self) -> tuple[str, int, list[str]]:
         """Returns (status_str, score, issues_list)."""
         return self._calc_health()
-
-    def get_sorted_events(self, limit: int = MAX_EVENTS_DISPLAY) -> list:
-        """Get events sorted by time (newest first)."""
-        events = self.get_events()
-        if isinstance(events, dict):
-            return []
-        return sorted(events, key=lambda e: e.last_timestamp or datetime.min, reverse=True)[:limit]
 
     # =========================================================================
     # Row Formatting (return data for table widgets)
@@ -1255,19 +1190,6 @@ class ClusterPresenter:
             ))
         return rows
 
-    def get_pod_dist_stats_rows(self) -> list[tuple]:
-        """Pod count statistics per node (min/avg/max/p95)."""
-        dist = self.get_pod_distribution()
-        if not dist:
-            return []
-        return [
-            ("Total Pods", str(dist.total_pods)),
-            ("Min per Node", str(dist.min_pods_per_node)),
-            ("Avg per Node", f"{dist.avg_pods_per_node:.1f}"),
-            ("Max per Node", str(dist.max_pods_per_node)),
-            ("P95 per Node", f"{dist.p95_pods_per_node:.1f}"),
-        ]
-
     def get_event_summary_rows(self) -> list[tuple]:
         """Event category summary rows."""
         rows: list[tuple] = []
@@ -1324,36 +1246,6 @@ class ClusterPresenter:
             ))
         return rows
 
-    def get_pdb_rows(self) -> list[tuple]:
-        rows: list[tuple] = []
-        for p in self.get_pdbs():
-            st = (
-                "[#30d158]Healthy[/#30d158]"
-                if not p.is_blocking
-                else "[bold #ff3b30]Blocking[/bold #ff3b30]"
-            )
-            expected_pods = str(getattr(p, "expected_pods", "N/A"))
-            current_healthy = str(getattr(p, "current_healthy", "N/A"))
-            disruptions = str(getattr(p, "disruptions_allowed", "N/A"))
-            unhealthy_policy = str(getattr(p, "unhealthy_pod_eviction_policy", "N/A"))
-            blocking_reason = getattr(p, "blocking_reason", None)
-            issues = str(blocking_reason) if blocking_reason else ""
-            if not issues and p.is_blocking:
-                issues = "[#ff9f0a]Budget may block disruptions[/#ff9f0a]"
-            rows.append((
-                p.namespace,
-                p.name,
-                str(p.min_available) if p.min_available is not None else "N/A",
-                str(p.max_unavailable) if p.max_unavailable is not None else "N/A",
-                expected_pods,
-                current_healthy,
-                disruptions,
-                unhealthy_policy,
-                st,
-                issues if issues else "-",
-            ))
-        return rows
-
     def get_pdb_coverage_summary_rows(self) -> list[tuple]:
         """Chart-level PDB coverage summary rows."""
         charts_overview = self.get_charts_overview()
@@ -1385,62 +1277,6 @@ class ClusterPresenter:
             ("Runtime PDB Coverage", f"[{coverage_color}]{coverage_pct:.1f}%[/{coverage_color}]"),
         ]
 
-    def get_all_workload_rows(self) -> list[tuple]:
-        """Runtime workload inventory rows for Workloads tab."""
-        rows: list[tuple] = []
-        for workload in self.get_all_workloads():
-            desired_raw = getattr(workload, "desired_replicas", None)
-            ready_raw = getattr(workload, "ready_replicas", None)
-            desired = str(desired_raw) if desired_raw is not None else "-"
-            ready = str(ready_raw) if ready_raw is not None else "-"
-            helm_release = str(getattr(workload, "helm_release", "") or "-")
-            has_pdb = bool(getattr(workload, "has_pdb", False))
-            pdb_state = (
-                "[#30d158]✅ Yes[/#30d158]"
-                if has_pdb
-                else "[bold #ff9f0a]No[/bold #ff9f0a]"
-            )
-
-            status_text = str(getattr(workload, "status", "Unknown") or "Unknown")
-            lowered_status = status_text.lower()
-            if lowered_status in {"ready", "running", "succeeded", "idle"}:
-                status_display = f"[#30d158]{status_text}[/#30d158]"
-            elif lowered_status in {"progressing", "pending", "scaledtozero", "suspended"}:
-                status_display = f"[#ff9f0a]{status_text}[/#ff9f0a]"
-            elif lowered_status in {"notready", "failed"}:
-                status_display = f"[bold #ff3b30]{status_text}[/bold #ff3b30]"
-            else:
-                status_display = status_text
-
-            rows.append((
-                str(getattr(workload, "namespace", "")),
-                str(getattr(workload, "kind", "")),
-                str(getattr(workload, "name", "")),
-                desired,
-                ready,
-                helm_release,
-                pdb_state,
-                status_display,
-            ))
-        return rows
-
-    def get_single_replica_rows(self) -> list[tuple]:
-        rows: list[tuple] = []
-        for wl in self.get_single_replica():
-            s = str(wl.status)
-            st = f"[#ff9f0a]{s}[/#ff9f0a]" if s == "Ready" else f"[bold #ff3b30]{s}[/bold #ff3b30]"
-            replicas = str(getattr(wl, "replicas", 1))
-            ready_count = getattr(wl, "ready_replicas", 0)
-            ready_str = f"{ready_count}/{replicas}"
-            # C3: Add status indicators to Ready column
-            if ready_count and str(ready_count) == replicas:
-                ready_display = f"[#30d158]{ready_str}[/#30d158]"
-            else:
-                ready_display = f"[bold #ff3b30]{ready_str}[/bold #ff3b30]"
-            helm = str(wl.helm_release) if wl.helm_release else "-"
-            rows.append((wl.namespace, wl.name, wl.kind, replicas, ready_display, helm, st))
-        return rows
-
     def _format_pct(self, value: float) -> str:
         """Format percentage with color coding."""
         text = f"{value:.0f}%"
@@ -1464,23 +1300,6 @@ class ClusterPresenter:
         if value > 0:
             return f"[#30d158]{text}[/#30d158]"
         return text
-
-    def get_node_dist_rows(self) -> list[tuple]:
-        rows: list[tuple] = []
-        # Availability Zone distribution
-        for az, count in sorted(self.get_az_distribution().items()):
-            rows.append(("Availability Zone", az, str(count)))
-        # Instance Type distribution
-        for itype, count in sorted(self.get_instance_type_distribution().items(), key=lambda x: x[1], reverse=True):
-            rows.append(("Instance Type", itype, str(count)))
-        # Kubelet Version distribution
-        for version, count in sorted(self.get_kubelet_version_distribution().items()):
-            rows.append(("Kubelet Version", f"v{version}" if not version.startswith("v") else version, str(count)))
-        # Node Groups by AZ matrix
-        for ng, az_counts in sorted(self.get_node_groups_az_matrix().items()):
-            for az, count in sorted(az_counts.items()):
-                rows.append((f"Group: {ng}", az, str(count)))
-        return rows
 
     def _percentile(self, values: list[float], pct: float) -> float:
         """Compute a percentile from a sorted list of floats."""
@@ -1509,11 +1328,10 @@ class ClusterPresenter:
             region, suffix = match.groups()
             grouped.setdefault(region, set()).add(suffix)
 
-        grouped_specs: list[tuple[str, tuple[str, ...]]] = []
-        for region in sorted(grouped):
-            grouped_specs.append((region, tuple(sorted(grouped[region]))))
-        for az_name in sorted(passthrough):
-            grouped_specs.append((az_name, ()))
+        grouped_specs = [
+            (region, tuple(sorted(grouped[region]))) for region in sorted(grouped)
+        ]
+        grouped_specs.extend((az_name, ()) for az_name in sorted(passthrough))
         return tuple(grouped_specs)
 
     def get_node_group_columns(self) -> list[tuple[str, int]]:
@@ -1769,52 +1587,6 @@ class ClusterPresenter:
     # Text Formatting (Rich markup strings)
     # =========================================================================
 
-    def get_overview_text(self) -> str:
-        d = self.get_overview_data()
-        lines = [
-            f"[b]Cluster Overview:[/b] [#30d158]{d['cluster_name']}[/#30d158]", "",
-            f"[b]Nodes:[/b] {d['ready_nodes']}/{d['total_nodes']} Ready",
-        ]
-        not_ready = d["total_nodes"] - d["ready_nodes"]
-        if not_ready:
-            lines.append(f"  [bold #ff3b30]{not_ready} Not Ready[/bold #ff3b30]")
-        lines.extend(["", f"[b]Events:[/b] {d['total_events']} total",
-                       f"  [#ff9f0a]{d['warning_events']} Warnings[/#ff9f0a]",
-                       f"  [bold #ff3b30]{d['error_events']} Errors[/bold #ff3b30]", "",
-                       f"[b]Pod Disruption Budgets:[/b] {d['total_pdbs']} total"])
-        lines.append(
-            f"  [bold #ff3b30]{d['blocking_pdbs']} Blocking[/bold #ff3b30]"
-            if d["blocking_pdbs"]
-            else "  [#30d158]All OK[/#30d158]"
-        )
-        lines.extend(["", f"[b]Single Replica Workloads:[/b] {d['single_replica_count']}"])
-        lines.append(
-            "  [#ff9f0a]Review for HA[/#ff9f0a]"
-            if d["single_replica_count"]
-            else "  [#30d158]All protected[/#30d158]"
-        )
-
-        # Nodes Approaching Pod Capacity cross-reference
-        high_pod_nodes = self.get_high_pod_count_nodes()
-        if high_pod_nodes:
-            lines.extend([
-                "",
-                f"[b][#ff9f0a]{len(high_pod_nodes)} node(s) approaching pod capacity"
-                f" -- see Groups tab for details[/#ff9f0a][/b]",
-            ])
-
-        return "\n".join(lines)
-
-    def get_health_text(self) -> str:
-        status, score, issues = self.get_health_data()
-        lines = [f"[b]Cluster Health:[/b] {status}", f"[b]Health Score:[/b] {score}/100", ""]
-        if issues:
-            lines.append("[b]Issues Detected:[/b]")
-            lines.extend(f"  - {i}" for i in issues)
-        else:
-            lines.append("[#30d158]No issues detected[/#30d158]")
-        return "\n".join(lines)
-
     # =========================================================================
     # Composite Data Methods
     # =========================================================================
@@ -1857,24 +1629,20 @@ class ClusterPresenter:
     # =========================================================================
 
     def filter_rows(self, rows: list[tuple], query: str) -> list[tuple]:
-        """Filter table rows by search query (case-insensitive match on any column)."""
+        """Filter table rows by search query (case-insensitive match on any column).
+
+        Performance: pre-lowercases the query once. Uses a local function
+        to avoid attribute lookup overhead in the inner loop and short-circuits
+        on first match per row via any().
+        """
         if not query:
             return rows
         q = query.lower()
-        return [row for row in rows if any(q in str(cell).lower() for cell in row)]
+        # Local ref avoids repeated global/method lookups in tight loop
+        _str = str
+        _lower = str.lower
+        return [
+            row for row in rows
+            if any(q in _lower(_str(cell)) for cell in row)
+        ]
 
-    # =========================================================================
-    # Backward Compatibility
-    # =========================================================================
-
-    # Backward-compatible aliases for tests
-    def get_event_rows(self) -> list[tuple]:
-        return self.get_event_summary_rows()
-
-    def get_pod_rows(self) -> list[tuple]:
-        return self.get_pod_dist_stats_rows()
-
-    def populate_all_tabs(self) -> None:
-        """Populate all tabs (delegates to screen's _refresh_all_tabs if available)."""
-        if hasattr(self._screen, "_refresh_all_tabs"):
-            self._screen._refresh_all_tabs()

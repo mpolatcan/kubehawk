@@ -60,27 +60,6 @@ from kubeagle.screens.detail.components import (
     ViolationsView,
 )
 from kubeagle.screens.detail.config import (
-    LABEL_ANTIAFFINITY,
-    LABEL_CPU_LIM,
-    LABEL_CPU_RATIO,
-    LABEL_CPU_REQ,
-    LABEL_HPA,
-    LABEL_LIVENESS,
-    LABEL_MEM_LIM,
-    LABEL_MEM_RATIO,
-    LABEL_MEM_REQ,
-    LABEL_PDB,
-    LABEL_PDB_MAX,
-    LABEL_PDB_MIN,
-    LABEL_PDB_TEMPLATE,
-    LABEL_PRIORITY,
-    LABEL_QOS,
-    LABEL_READINESS,
-    LABEL_REPLICAS,
-    LABEL_STARTUP,
-    LABEL_TEAM,
-    LABEL_TOPOLOGY,
-    LABEL_VALUES_FILE,
     QOS_COLORS,
     RATIO_GOOD_MAX,
     RATIO_WARN_MAX,
@@ -418,7 +397,11 @@ class _ChartsFiltersModal(ModalScreen[_ChartsFilterState | None]):
             self.query_one("#charts-filters-modal-team-list", CustomSelectionList).focus()
 
     def on_resize(self, _: Resize) -> None:
-        self._apply_dynamic_layout()
+        if hasattr(self, "_resize_timer") and self._resize_timer is not None:
+            self._resize_timer.stop()
+        self._resize_timer: Timer | None = self.set_timer(
+            0.1, self._apply_dynamic_layout
+        )
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -760,33 +743,7 @@ class _ChartDetailsModal(ModalScreen[None]):
             return f"[bold #ff9f0a]{ratio:.1f}x[/bold #ff9f0a]"
         return f"[bold #ff3b30]{ratio:.1f}x[/bold #ff3b30]"
 
-    @staticmethod
-    def _format_memory(value: float) -> str:
-        """Format memory values using the same units/scale as the table."""
-        if value <= 0:
-            return "-"
-        if value >= 1024 * 1024 * 1024:
-            return f"{value / (1024 * 1024 * 1024):.1f}Gi"
-        if value >= 1024 * 1024:
-            return f"{value / (1024 * 1024):.1f}Mi"
-        if value >= 1024:
-            return f"{value / 1024:.1f}Ki"
-        return f"{value:.0f}B"
-
-    @staticmethod
-    def _classify_values_file_type(values_file: str) -> str:
-        """Classify values source type for metadata overview."""
-        source = values_file.strip()
-        if source.startswith("cluster:"):
-            return "Cluster"
-        file_name = Path(source).name.lower()
-        if "automation" in file_name:
-            return "Automation"
-        if file_name == "values.yaml":
-            return "Main"
-        if "default" in file_name:
-            return "Default"
-        return "Other"
+    _format_memory = staticmethod(ChartsExplorerPresenter._format_memory)
 
     def compose(self) -> ComposeResult:
         chart = self._chart
@@ -810,7 +767,7 @@ class _ChartDetailsModal(ModalScreen[None]):
         team_display = escape(chart.team) if chart.team else "Unknown"
         priority_display = escape(priority)
         values_file_type_display = escape(
-            self._classify_values_file_type(chart.values_file)
+            ChartsExplorerPresenter._classify_values_file_type(chart.values_file)
         )
 
         cpu_req = self._format_resource(chart.cpu_request, "m")
@@ -1021,7 +978,11 @@ class _ChartDetailsModal(ModalScreen[None]):
             self.query_one("#chart-details-modal-close", CustomButton).focus()
 
     def on_resize(self, _: Resize) -> None:
-        self._apply_dynamic_layout()
+        if hasattr(self, "_resize_timer") and self._resize_timer is not None:
+            self._resize_timer.stop()
+        self._resize_timer: Timer | None = self.set_timer(
+            0.1, self._apply_dynamic_layout
+        )
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -1071,8 +1032,6 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
     _WIDE_MIN_WIDTH = 175
     _MEDIUM_MIN_WIDTH = 100
     _RESIZE_DEBOUNCE_SECONDS = 0.08
-    _MAX_VALUES_FILE_LENGTH = 72
-    _DOUBLE_SELECT_THRESHOLD_SECONDS = 0.5
     _CLUSTER_PARTIAL_UPDATE_STEP = 5
     _CLUSTER_PARTIAL_UPDATE_MIN_INTERVAL_SECONDS = 0.35
     _OPTIMIZER_PARTIAL_UPDATE_STEP = 2
@@ -1150,6 +1109,7 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
         self._reload_violation_counts_on_resume = False
         self._render_data_on_resume = False
         self._render_violations_on_resume = False
+        self._render_optimizer_on_resume = False
         self._selected_chart: ChartInfo | None = None
         self._layout_mode: str | None = None
         self._optimizer_loading = False
@@ -1160,11 +1120,13 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
         self._ignore_next_view_tab_id: str | None = None
         self._table_populate_sequence = 0
         self._last_table_columns_signature: tuple[int, ...] | None = None
+        self._background_tasks: set[asyncio.Task[Any]] = set()
         self._populate_on_tab_switch_pending = False
         self._populate_on_tab_switch_force = False
         self._partial_charts_refresh_scheduled = False
         self._partial_charts_refresh_timer: Timer | None = None
         self._last_filter_signature: tuple[Any, ...] | None = None
+        self._table_content_signature: tuple[Any, ...] | None = None
         self._charts_controller: Any | None = None
         self._charts_controller_cache_key: tuple[str, str, str, str] | None = None
         self._violations_signature: str | None = None
@@ -1176,8 +1138,6 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
         self._streaming_optimizer_charts: list[ChartInfo] = []
         self._last_optimizer_partial_ui_update_monotonic: float = 0.0
         self._violations_view_initialized = False
-        self._last_selected_row: int | None = None
-        self._last_selected_row_time: float = 0.0
         self._chart_search_index: dict[int, str] = {}
         self._chart_values_file_type_index: dict[int, str] = {}
         self._charts_load_progress = 0
@@ -1186,10 +1146,13 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
         self._charts_progress_animation_timer: Timer | None = None
         self._charts_loading_message = "Idle"
         self._charts_progress_is_error = False
+        self._cached_progress_bar: ProgressBar | None = None
+        self._cached_loading_text: CustomStatic | None = None
         self._charts_load_generation = 0
         self._charts_payload_ready_for_optimizer = False
         self._violations_cache_generation = -1
         self._batch_updating = False
+        self._cached_search_input: CustomInput | None = None
         self._last_partial_table_repaint_monotonic: float = 0.0
         self._last_partial_table_repaint_chart_count: int = 0
 
@@ -1329,15 +1292,22 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
 
     @staticmethod
     def _charts_payload_signature(charts: list[ChartInfo]) -> str:
-        """Build stable digest for charts payload to reuse expensive analysis."""
-        hasher = hashlib.sha1()
+        """Build stable digest for charts payload to reuse expensive analysis.
+
+        Uses a sort-key tuple per chart fed directly into the hasher to avoid
+        creating large intermediate f-strings.  The sort itself uses a
+        lightweight key to produce a deterministic order.
+        """
+        hasher = hashlib.sha1(usedforsecurity=False)
         values_mtime_cache: dict[str, int] = {}
-        for chart in sorted(
-            charts,
-            key=lambda item: (item.name, item.values_file, item.namespace or ""),
-        ):
-            qos_value = str(getattr(getattr(chart, "qos_class", ""), "value", ""))
-            values_file = str(chart.values_file or "")
+
+        # Build per-chart keys and sort — use a minimal sort key to avoid
+        # repeated getattr/str calls during sort comparisons.
+        def _sort_key(c: ChartInfo) -> tuple[str, str, str]:
+            return (c.name, c.values_file, c.namespace or "")
+
+        for chart in sorted(charts, key=_sort_key):
+            values_file = chart.values_file or ""
             values_mtime = values_mtime_cache.get(values_file)
             if values_mtime is None:
                 values_mtime = -1
@@ -1347,17 +1317,19 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
                             Path(values_file).expanduser().resolve().stat().st_mtime_ns
                         )
                 values_mtime_cache[values_file] = values_mtime
+
+            qos_value = getattr(chart.qos_class, "value", "")
+            # Feed a single encoded line per chart into the incremental hasher
             hasher.update(
-                (
-                    f"{chart.name}|{chart.namespace or ''}|{chart.team}|{values_file}|"
-                    f"{chart.replicas}|{chart.pdb_enabled}|"
-                    f"{chart.pdb_min_available}|{chart.pdb_max_unavailable}|"
-                    f"{chart.has_liveness}|{chart.has_readiness}|{chart.has_startup}|"
-                    f"{chart.has_anti_affinity}|{chart.has_topology_spread}|"
-                    f"{chart.cpu_request:.6f}|{chart.cpu_limit:.6f}|"
-                    f"{chart.memory_request:.6f}|{chart.memory_limit:.6f}|"
-                    f"{qos_value}|{values_mtime}\n"
-                ).encode()
+                f"{chart.name}|{chart.namespace or ''}|{chart.team}|{values_file}|"
+                f"{chart.replicas}|{chart.pdb_enabled}|"
+                f"{chart.pdb_min_available}|{chart.pdb_max_unavailable}|"
+                f"{chart.has_liveness}|{chart.has_readiness}|{chart.has_startup}|"
+                f"{chart.has_anti_affinity}|{chart.has_topology_spread}|"
+                f"{chart.cpu_request:.6f}|{chart.cpu_limit:.6f}|"
+                f"{chart.memory_request:.6f}|{chart.memory_limit:.6f}|"
+                f"{qos_value}|{values_mtime}\n"
+                .encode()
             )
         return hasher.hexdigest()
 
@@ -1372,14 +1344,6 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
             int(getattr(app_settings, "helm_template_timeout_seconds", 30)),
         )
         return analysis_source, render_timeout_seconds
-
-    def _violations_payload_signature(self, charts: list[ChartInfo]) -> str:
-        """Build signature for full violations output including analysis settings."""
-        analysis_source, render_timeout_seconds = self._optimizer_settings_signature()
-        return (
-            f"{self._charts_payload_signature(charts)}|"
-            f"{analysis_source}|{render_timeout_seconds}"
-        )
 
     async def _violations_payload_signature_async(self, charts: list[ChartInfo]) -> str:
         """Build violations signature without blocking the UI event loop."""
@@ -1399,7 +1363,10 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
     def _clone_violations_payload(
         violations: list[ViolationResult],
     ) -> list[ViolationResult]:
-        return [violation.model_copy(deep=True) for violation in violations]
+        # ViolationResult objects are never mutated after creation, so a
+        # shallow list copy is sufficient and avoids the Pydantic deep-copy
+        # overhead (model_copy(deep=True) is ~100x slower per object).
+        return list(violations)
 
     def _cache_violations_payload(
         self,
@@ -1663,22 +1630,19 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
             self._charts_progress_animation_timer = None
         self._partial_charts_refresh_scheduled = False
         self._stop_partial_charts_refresh_timer()
-        should_cancel = False
         if self._loading:
             # Keep primary charts load alive to avoid expensive restart thrash.
             self._reload_on_resume = False
             self._render_data_on_resume = True
         if self._optimizer_loading:
-            self._reload_optimizer_on_resume = True
-            should_cancel = True
+            # Keep optimizer worker alive in background.
+            # On resume, if it finished, just render cached results.
+            self._render_optimizer_on_resume = True
         if self._violation_counts_loading:
             # Keep violation-count analysis running in background and re-render
             # once this screen becomes active again.
             self._reload_violation_counts_on_resume = False
             self._render_violations_on_resume = True
-        if should_cancel:
-            self._cancel_workers_by_name("charts-explorer-optimizer")
-            self._optimizer_loading = False
 
     def on_screen_resume(self) -> None:
         """Resume deferred data loading after returning to this screen."""
@@ -1691,6 +1655,15 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
         ):
             self._reload_on_resume = False
             self._start_load_worker()
+        if self._render_optimizer_on_resume:
+            self._render_optimizer_on_resume = False
+            if self._optimizer_loaded:
+                # Finished while away — deliver cached data to ViolationsView
+                self._deliver_cached_optimizer_data()
+            elif not self._optimizer_loading:
+                # Failed while away — restart
+                self._ensure_optimizer_data_loaded()
+            # else: still loading, message handler will deliver when done
         if (
             self._reload_optimizer_on_resume
             and not self._optimizer_loading
@@ -1755,40 +1728,37 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
             return "medium"
         return "narrow"
 
+    _RESPONSIVE_CONTAINER_IDS = (
+        "#charts-filter-bar",
+        "#charts-top-controls-row",
+        "#charts-loading-bar",
+        "#charts-main-content",
+    )
+
     def _update_responsive_layout(self) -> None:
-        """Apply breakpoint classes to key containers for responsive CSS rules."""
+        """Apply breakpoint classes to key containers for responsive CSS rules.
+
+        Uses set_classes to swap the mode class in a single DOM mutation per
+        widget instead of N remove_class + 1 add_class calls.
+        """
         mode = self._get_layout_mode()
         if mode == self._layout_mode:
             return
+        old_mode = self._layout_mode
         self._layout_mode = mode
 
-        for class_name in ("ultra", "wide", "medium", "narrow"):
-            self.remove_class(class_name)
+        # Swap class on screen itself
+        if old_mode:
+            self.remove_class(old_mode)
         self.add_class(mode)
 
-        with contextlib.suppress(Exception):
-            filter_bar = self.query_one("#charts-filter-bar", CustomVertical)
-            for class_name in ("ultra", "wide", "medium", "narrow"):
-                filter_bar.remove_class(class_name)
-            filter_bar.add_class(mode)
-
-        with contextlib.suppress(Exception):
-            top_controls = self.query_one("#charts-top-controls-row", CustomHorizontal)
-            for class_name in ("ultra", "wide", "medium", "narrow"):
-                top_controls.remove_class(class_name)
-            top_controls.add_class(mode)
-
-        with contextlib.suppress(Exception):
-            loading_bar = self.query_one("#charts-loading-bar", CustomHorizontal)
-            for class_name in ("ultra", "wide", "medium", "narrow"):
-                loading_bar.remove_class(class_name)
-            loading_bar.add_class(mode)
-
-        with contextlib.suppress(Exception):
-            main_content = self.query_one("#charts-main-content", CustomHorizontal)
-            for class_name in ("ultra", "wide", "medium", "narrow"):
-                main_content.remove_class(class_name)
-            main_content.add_class(mode)
+        # Swap class on each responsive container in a single pass
+        for selector in self._RESPONSIVE_CONTAINER_IDS:
+            with contextlib.suppress(Exception):
+                widget = self.query_one(selector)
+                if old_mode:
+                    widget.remove_class(old_mode)
+                widget.add_class(mode)
 
     # =========================================================================
     # Tabs + Optimizer Views
@@ -1817,12 +1787,16 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
                 self._activate_view_tab(violations_tab_id)
 
         if target_tab == TAB_CHARTS:
-            if self.current_view == ViewFilter.WITH_VIOLATIONS:
-                # "Optimizer" is the violations/recommendations pane; keep view tabs
-                # and active content aligned when returning to charts table.
-                self.current_view = ViewFilter.ALL
-            else:
-                self._sync_view_tabs()
+            # Suppress reactive watchers during tab switch to avoid redundant
+            # _apply_filters_and_populate() calls from watch_current_view etc.
+            self._batch_updating = True
+            try:
+                if self.current_view == ViewFilter.WITH_VIOLATIONS:
+                    self.current_view = ViewFilter.ALL
+                else:
+                    self._sync_view_tabs()
+            finally:
+                self._batch_updating = False
             if self.charts:
                 self._schedule_charts_tab_repopulate(force=False)
                 self._ensure_violation_counts_available()
@@ -1921,6 +1895,23 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
                 vv.team_filter = target_team_filter
                 if self._optimizer_loaded and not vv._table_loading:
                     vv.populate_violations_table()
+
+    def _deliver_cached_optimizer_data(self) -> None:
+        """Push already-cached optimizer results into ViolationsView after resume."""
+        violations = self._cached_violations or self._streaming_optimizer_violations
+        charts = self._streaming_optimizer_charts or list(self.charts)
+        if not violations:
+            return
+        try:
+            vv = self.query_one("#violations-view", ViolationsView)
+            vv.set_table_loading(False)
+            vv.set_recommendations_loading(False)
+            vv.update_data(violations, charts)
+            if self._cached_helm_recommendations is not None:
+                vv.update_recommendations_data(self._cached_helm_recommendations, charts)
+        except Exception:
+            pass
+        self._apply_optimizer_team_filter()
 
     def _reset_optimizer_caches(self) -> None:
         """Clear cached optimizer payloads for a guaranteed full re-analysis."""
@@ -2181,9 +2172,20 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
                     if not should_emit_partial:
                         continue
 
-                    partial_recommendations = build_helm_recommendations(
-                        cumulative_partial_violations,
-                        charts,
+                    # Only rebuild recommendations at milestone points (every
+                    # 25% of total or on final emit) to avoid the O(n) cost of
+                    # build_helm_recommendations on every partial update.
+                    is_milestone = (
+                        completed >= total_charts
+                        or (total_charts > 0 and completed % max(1, total_charts // 4) == 0)
+                    )
+                    partial_recommendations = (
+                        build_helm_recommendations(
+                            cumulative_partial_violations,
+                            charts,
+                        )
+                        if is_milestone
+                        else None
                     )
                     self.post_message(
                         ChartsExplorerOptimizerPartialLoaded(
@@ -2831,6 +2833,18 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
                         force_refresh=pending_force_refresh,
                     )
                 )
+            # Charts load finished — if optimizer was deferred because _loading
+            # was True, kick it off now.
+            elif (
+                self._reload_optimizer_on_resume
+                and not self._optimizer_loading
+                and not self._optimizer_loaded
+                and self._active_tab == TAB_VIOLATIONS
+                and bool(self.charts)
+                and self.is_attached
+            ):
+                self._reload_optimizer_on_resume = False
+                self.call_later(self._start_optimizer_worker)
 
     def _start_violation_counts_worker(
         self,
@@ -3083,6 +3097,7 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
             return
         if self._active_tab != TAB_CHARTS:
             self._last_filter_signature = None
+            self._table_content_signature = None
             return
         self._schedule_charts_tab_repopulate(force=True)
         self.app.notify("Violation analysis completed", timeout=3)
@@ -3117,10 +3132,16 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
         if self._active_tab != TAB_CHARTS:
             return
 
-        # Get search query
+        # Get search query from cached ref or DOM fallback
         search_query = ""
-        with contextlib.suppress(Exception):
-            search_query = self.query_one("#charts-search-input", CustomInput).value
+        search_ref = getattr(self, "_cached_search_input", None)
+        if search_ref is not None:
+            search_query = search_ref.value
+        else:
+            with contextlib.suppress(Exception):
+                search_ref = self.query_one("#charts-search-input", CustomInput)
+                self._cached_search_input = search_ref
+                search_query = search_ref.value
         normalized_query = search_query.strip().lower()
 
         active_charts = self._active_charts
@@ -3145,7 +3166,7 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
             return
         self._last_filter_signature = render_signature
 
-        # Apply filters
+        # Apply all filters in a single pass after presenter pre-filter
         self.filtered_charts = self._presenter.apply_filters(
             self.charts,
             self.current_view,
@@ -3154,24 +3175,23 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
             self.show_active_only,
             self._active_charts,
         )
-        if normalized_query:
-            self.filtered_charts = [
-                chart
-                for chart in self.filtered_charts
-                if normalized_query in self._chart_search_haystack(chart)
-            ]
-        if self._qos_filter_values:
-            self.filtered_charts = [
-                chart
-                for chart in self.filtered_charts
-                if chart.qos_class.value in self._qos_filter_values
-            ]
-        if self._values_file_type_filter_values:
-            self.filtered_charts = [
-                chart
-                for chart in self.filtered_charts
-                if self._chart_values_file_type(chart) in self._values_file_type_filter_values
-            ]
+        # Combine search + QoS + values-file-type into one pass
+        has_search = bool(normalized_query)
+        has_qos = bool(self._qos_filter_values)
+        has_vft = bool(self._values_file_type_filter_values)
+        if has_search or has_qos or has_vft:
+            qos_values = self._qos_filter_values
+            vft_values = self._values_file_type_filter_values
+            combined = []
+            for chart in self.filtered_charts:
+                if has_search and normalized_query not in self._chart_search_haystack(chart):
+                    continue
+                if has_qos and chart.qos_class.value not in qos_values:
+                    continue
+                if has_vft and self._chart_values_file_type(chart) not in vft_values:
+                    continue
+                combined.append(chart)
+            self.filtered_charts = combined
 
         if self._violations_required_for_charts_table():
             self._ensure_violation_counts_available()
@@ -3181,10 +3201,9 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
             sort_by=self.current_sort,
             descending=self.sort_desc,
         )
-        rows = [self._presenter.format_chart_row(chart) for chart in sorted_filtered_charts]
 
-        # Populate table
-        self._populate_table(rows, sorted_charts=sorted_filtered_charts)
+        # Populate table — defer row formatting to async _do_populate
+        self._populate_table(sorted_charts=sorted_filtered_charts)
 
         # Update summary
         self._update_summary()
@@ -3195,11 +3214,10 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
 
     def _populate_table(
         self,
-        rows: list[tuple[str, ...]],
         *,
         sorted_charts: list[ChartInfo] | None = None,
     ) -> None:
-        """Populate the explorer table with rows."""
+        """Populate the explorer table with rows (formatting deferred to async)."""
         try:
             table = self.query_one("#explorer-table", CustomDataTable)
         except Exception:
@@ -3208,8 +3226,39 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
         visible_indices = self._visible_column_indices()
         columns_changed = visible_indices != self._last_table_columns_signature
 
+        charts_for_rows = sorted_charts or []
+        filtered_count = len(self.filtered_charts)
+
+        # Build a content signature from the chart identities, order, and columns.
+        # If the table already shows exactly this content, skip the expensive
+        # clear-and-rebuild cycle entirely — the DOM rows are still intact.
+        # Note: violation_revision is intentionally excluded here — it affects
+        # which charts pass the filter/sort (handled by render_signature in
+        # _apply_filters_and_populate), but format_chart_row() output does
+        # not include violation data.  Including it here caused unnecessary
+        # table clear-and-rebuild cycles that produced visible flicker when
+        # switching back from the violations tab.
+        content_sig: tuple[Any, ...] = (
+            tuple(id(c) for c in charts_for_rows),
+            visible_indices,
+        )
+        if not columns_changed and content_sig == self._table_content_signature:
+            # Table already has the right rows — just update title/selection.
+            with contextlib.suppress(Exception):
+                self.query_one("#explorer-table-title", CustomStatic).update(
+                    f"Charts Table ({filtered_count})",
+                )
+            return
+
         self._table_populate_sequence += 1
         sequence = self._table_populate_sequence
+
+        # Capture presenter ref for the async closure
+        presenter = self._presenter
+
+        # Threshold above which row formatting is offloaded to a worker thread
+        # to avoid blocking the Textual event loop.
+        _ROW_FORMAT_THREAD_THRESHOLD = 80
 
         async def _do_populate() -> None:
             if not self._screen_is_current() or self._active_tab != TAB_CHARTS:
@@ -3217,14 +3266,30 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
                 return
             if sequence != self._table_populate_sequence:
                 return
-            async with table.batch():
-                if not self._screen_is_current() or self._active_tab != TAB_CHARTS:
-                    self._render_data_on_resume = True
-                    return
-                if sequence != self._table_populate_sequence:
-                    return
-                if table.data_table is not None:
-                    table.data_table.fixed_columns = self._locked_fixed_column_count(
+
+            # Format rows — offload to thread for large payloads to keep UI
+            # responsive during the pure-Python string formatting work.
+            def _format_all() -> list[tuple[str, ...]]:
+                return [
+                    tuple(row[i] for i in visible_indices)
+                    for row in (presenter.format_chart_row(c) for c in charts_for_rows)
+                ]
+
+            if len(charts_for_rows) > _ROW_FORMAT_THREAD_THRESHOLD:
+                visible_rows = await asyncio.to_thread(_format_all)
+            else:
+                visible_rows = _format_all()
+
+            if sequence != self._table_populate_sequence:
+                return
+
+            inner = table.data_table
+
+            # Phase 1 — clear + column setup in a single batch so the user
+            # never sees an intermediate state with wrong columns.
+            with table.batch_update():
+                if inner is not None:
+                    inner.fixed_columns = self._locked_fixed_column_count(
                         visible_indices,
                     )
                 if columns_changed:
@@ -3237,49 +3302,58 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
                 else:
                     table.clear(columns=False)
 
-                if sorted_charts is not None and len(sorted_charts) == len(rows):
-                    self._row_chart_map = dict(enumerate(sorted_charts))
-                else:
-                    self._row_chart_map = {}
-                row_count = len(rows)
-                chunk_size = self._table_chunk_size(row_count)
-                if row_count and chunk_size < row_count:
-                    for start in range(0, row_count, chunk_size):
-                        if (
-                            not self._screen_is_current()
-                            or self._active_tab != TAB_CHARTS
-                            or sequence != self._table_populate_sequence
-                        ):
-                            return
-                        end = min(start + chunk_size, row_count)
-                        table.add_rows(
-                            tuple(row[index] for index in visible_indices)
-                            for row in rows[start:end]
-                        )
-                        if end < row_count:
-                            await asyncio.sleep(0)
-                elif row_count:
-                    table.add_rows(
-                        tuple(row[index] for index in visible_indices)
-                        for row in rows
-                    )
+            if sorted_charts is not None and len(sorted_charts) == len(visible_rows):
+                self._row_chart_map = dict(enumerate(sorted_charts))
+            else:
+                self._row_chart_map = {}
 
-                with contextlib.suppress(Exception):
-                    self.query_one("#explorer-table-title", CustomStatic).update(
-                        f"Charts Table ({len(self.filtered_charts)})",
-                    )
+            # Phase 2 — insert rows in per-chunk batches.  Each chunk gets
+            # its own batch_update so _on_idle → _update_dimensions only
+            # measures that chunk's new rows, keeping the UI responsive.
+            row_count = len(visible_rows)
+            chunk_size = self._table_chunk_size(row_count)
 
-                if self._row_chart_map:
-                    selected_row = self._find_selected_chart_row(self._row_chart_map)
-                    target_row = (
-                        selected_row
-                        if selected_row is not None
-                        else min(self._row_chart_map.keys())
-                    )
-                    table.cursor_row = target_row
-                    self._set_selected_chart(self._row_chart_map[target_row])
-                else:
-                    self._clear_selected_chart()
+            if row_count and chunk_size < row_count:
+                for start in range(0, row_count, chunk_size):
+                    if (
+                        not self._screen_is_current()
+                        or self._active_tab != TAB_CHARTS
+                        or sequence != self._table_populate_sequence
+                    ):
+                        return
+                    end = min(start + chunk_size, row_count)
+                    with table.batch_update():
+                        table.add_rows(visible_rows[start:end])
+                    if end < row_count:
+                        # Yield so _on_idle measures only this chunk's rows
+                        await asyncio.sleep(0)
+            elif row_count:
+                with table.batch_update():
+                    table.add_rows(visible_rows)
+
+            if sequence != self._table_populate_sequence:
+                return
+
+            # Record what the table now contains so future tab-switch
+            # round-trips can skip the rebuild when nothing changed.
+            self._table_content_signature = content_sig
+
+            with contextlib.suppress(Exception):
+                self.query_one("#explorer-table-title", CustomStatic).update(
+                    f"Charts Table ({filtered_count})",
+                )
+
+            if self._row_chart_map:
+                selected_row = self._find_selected_chart_row(self._row_chart_map)
+                target_row = (
+                    selected_row
+                    if selected_row is not None
+                    else min(self._row_chart_map.keys())
+                )
+                table.cursor_row = target_row
+                self._set_selected_chart(self._row_chart_map[target_row])
+            else:
+                self._clear_selected_chart()
 
         self.call_later(_do_populate)
 
@@ -3441,15 +3515,18 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
         state_plain = self._charts_loading_message
         is_error = self._charts_progress_is_error
 
-        with contextlib.suppress(Exception):
-            self.query_one("#charts-progress-bar", ProgressBar).update(
-                total=100,
-                progress=display_percent,
-            )
+        # Use cached widget refs to avoid per-frame DOM queries
+        if self._cached_progress_bar is None:
+            with contextlib.suppress(Exception):
+                self._cached_progress_bar = self.query_one("#charts-progress-bar", ProgressBar)
+        if self._cached_progress_bar is not None:
+            with contextlib.suppress(Exception):
+                self._cached_progress_bar.update(total=100, progress=display_percent)
 
-        loading_text_widget: CustomStatic | None = None
-        with contextlib.suppress(Exception):
-            loading_text_widget = self.query_one("#charts-loading-text", CustomStatic)
+        if self._cached_loading_text is None:
+            with contextlib.suppress(Exception):
+                self._cached_loading_text = self.query_one("#charts-loading-text", CustomStatic)
+        loading_text_widget = self._cached_loading_text
 
         prefix = f"{display_percent}% - "
         max_chars = self._progress_text_limit()
@@ -3536,6 +3613,7 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
         try:
             table = self.query_one("#explorer-table", CustomDataTable)
             self._last_table_columns_signature = None
+            self._table_content_signature = None
 
             async def _do_empty() -> None:
                 if not self._screen_is_current() or self._active_tab != TAB_CHARTS:
@@ -3582,7 +3660,7 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
                 and chart_id in self._chart_values_file_type_index
             ):
                 continue
-            values_type = self._classify_values_file_type(chart.values_file)
+            values_type = ChartsExplorerPresenter._classify_values_file_type(chart.values_file)
             values_type_index[chart_id] = values_type
             search_index[chart_id] = "|".join(
                 (
@@ -3603,7 +3681,7 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
         cached = self._chart_values_file_type_index.get(chart_id)
         if cached is not None:
             return cached
-        value = self._classify_values_file_type(chart.values_file)
+        value = ChartsExplorerPresenter._classify_values_file_type(chart.values_file)
         self._chart_values_file_type_index[chart_id] = value
         return value
 
@@ -3689,6 +3767,7 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
         if previous_visible != self._visible_column_names:
             self._last_filter_signature = None
             self._last_table_columns_signature = None
+            self._table_content_signature = None
 
     def _sync_current_team_from_filter(self) -> None:
         """Keep legacy single-team state in sync with SelectionList filter values."""
@@ -3948,7 +4027,7 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
             self._set_selected_chart(chart)
 
     def on_data_table_row_selected(self, _: object) -> None:
-        """Handle row selection and open chart preview on double-select."""
+        """Handle row activation (Enter / click on highlighted row) and open chart preview."""
         if self._active_tab != TAB_CHARTS:
             return
         try:
@@ -3966,17 +4045,9 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
             return
 
         self._set_selected_chart(chart)
-
-        now = time.monotonic()
-        is_double_select = (
-            cursor_row == self._last_selected_row
-            and (now - self._last_selected_row_time)
-            <= self._DOUBLE_SELECT_THRESHOLD_SECONDS
-        )
-        self._last_selected_row = cursor_row
-        self._last_selected_row_time = now
-        if is_double_select:
-            asyncio.ensure_future(self._open_chart_preview_dialog(chart))
+        task = asyncio.create_task(self._open_chart_preview_dialog(chart))
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
     # =========================================================================
     # Actions
@@ -4001,7 +4072,9 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
             return
 
         self._set_selected_chart(chart)
-        asyncio.ensure_future(self._open_chart_preview_dialog(chart))
+        task = asyncio.create_task(self._open_chart_preview_dialog(chart))
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
     def action_toggle_mode(self) -> None:
         """Toggle between cluster and local mode."""
@@ -4240,65 +4313,9 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
     # Chart Preview Dialog
     # =========================================================================
 
-    @staticmethod
-    def _format_resource(value: float, unit: str) -> str:
-        """Format a resource value, stripping unnecessary decimal places."""
-        if value <= 0:
-            return "-"
-        if value == int(value):
-            return f"{int(value)}{unit}"
-        return f"{value}{unit}"
-
-    @classmethod
-    def _shorten_values_file(cls, value: str) -> str:
-        """Shorten a long values file path while preserving the tail."""
-        if len(value) <= cls._MAX_VALUES_FILE_LENGTH:
-            return value
-        tail = value[-(cls._MAX_VALUES_FILE_LENGTH - 3):]
-        return f"...{tail}"
-
-    @staticmethod
-    def _classify_values_file_type(values_file: str) -> str:
-        """Match table values file type labels for filtering."""
-        file_name = Path(values_file).name.lower()
-        if "automation" in file_name:
-            return "Automation"
-        if file_name == "values.yaml":
-            return "Main"
-        if "default" in file_name:
-            return "Default"
-        return "Other"
-
-    @staticmethod
-    def _format_ratio(limit: float, request: float) -> str:
-        """Format limit/request ratio with severity labels."""
-        if not request:
-            return "N/A"
-        ratio = limit / request
-        ratio_str = f"{ratio:.1f}×"
-        if ratio <= RATIO_GOOD_MAX:
-            return f"{ratio_str} (ok)"
-        if ratio <= RATIO_WARN_MAX:
-            return f"{ratio_str} (warn)"
-        return f"{ratio_str} (high)"
-
-    @staticmethod
-    def _to_markdown_code(value: str) -> str:
-        """Render a value as a safe markdown inline code span."""
-        safe_value = value.replace("`", "'")
-        return f"`{safe_value}`"
-
-    @staticmethod
-    def _format_markdown_field(label: str, value: str) -> str:
-        """Format a single markdown bullet field line."""
-        field = label.rstrip(":")
-        return f"- **{field}:** {value}"
-
     def _clear_selected_chart(self) -> None:
         """Clear chart selection when table has no selectable rows."""
         self._selected_chart = None
-        self._last_selected_row = None
-        self._last_selected_row_time = 0.0
 
     def _set_selected_chart(self, chart: ChartInfo) -> None:
         """Set selected chart."""
@@ -4324,88 +4341,6 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
             if self._chart_selection_key(chart) == selected_key:
                 return row_index
         return None
-
-    def _build_chart_detail_markdown(self, chart: ChartInfo) -> str:
-        """Build markdown content for chart preview dialog."""
-        cpu_req = self._format_resource(chart.cpu_request, "m")
-        cpu_lim = self._format_resource(chart.cpu_limit, "m")
-        cpu_ratio = self._format_ratio(chart.cpu_limit, chart.cpu_request)
-        mem_req = self._format_resource(chart.memory_request, "Mi")
-        mem_lim = self._format_resource(chart.memory_limit, "Mi")
-        mem_ratio = self._format_ratio(chart.memory_limit, chart.memory_request)
-
-        qos = chart.qos_class.value if chart.qos_class else "Unknown"
-
-        liveness = "Configured" if chart.has_liveness else "Missing"
-        readiness = "Configured" if chart.has_readiness else "Missing"
-        startup = "Configured" if chart.has_startup else "Missing"
-
-        replicas = str(chart.replicas) if chart.replicas is not None else "Not set"
-        if chart.replicas == 1:
-            replicas_text = f"{replicas} (single replica)"
-        elif chart.replicas is not None and chart.replicas > 1:
-            replicas_text = replicas
-        else:
-            replicas_text = replicas
-
-        if chart.pdb_enabled:
-            pdb_text = "Enabled"
-            pdb_template = "Yes" if chart.pdb_template_exists else "No"
-            pdb_min = (
-                str(chart.pdb_min_available)
-                if chart.pdb_min_available is not None
-                else "Not set"
-            )
-            pdb_max = (
-                str(chart.pdb_max_unavailable)
-                if chart.pdb_max_unavailable is not None
-                else "Not set"
-            )
-        else:
-            pdb_text = "Disabled"
-            pdb_template = "-"
-            pdb_min = "-"
-            pdb_max = "-"
-
-        antiaffinity = "Enabled" if chart.has_anti_affinity else "Missing"
-        topology = "Enabled" if chart.has_topology_spread else "Missing"
-        team = chart.team if chart.team else "Unknown"
-        namespace = chart.namespace or "-"
-        priority = chart.priority_class if chart.priority_class else "Not set"
-        values = self._shorten_values_file(chart.values_file) if chart.values_file else "Not found"
-
-        lines = [
-            "### Overview",
-            self._format_markdown_field(LABEL_TEAM, self._to_markdown_code(team)),
-            self._format_markdown_field("Namespace", self._to_markdown_code(namespace)),
-            self._format_markdown_field(LABEL_VALUES_FILE, self._to_markdown_code(values)),
-            self._format_markdown_field(LABEL_QOS, self._to_markdown_code(qos)),
-            self._format_markdown_field(LABEL_PRIORITY, self._to_markdown_code(priority)),
-            "",
-            "### Resources",
-            self._format_markdown_field(LABEL_CPU_REQ, self._to_markdown_code(cpu_req)),
-            self._format_markdown_field(LABEL_CPU_LIM, self._to_markdown_code(cpu_lim)),
-            self._format_markdown_field(LABEL_CPU_RATIO, self._to_markdown_code(cpu_ratio)),
-            self._format_markdown_field(LABEL_MEM_REQ, self._to_markdown_code(mem_req)),
-            self._format_markdown_field(LABEL_MEM_LIM, self._to_markdown_code(mem_lim)),
-            self._format_markdown_field(LABEL_MEM_RATIO, self._to_markdown_code(mem_ratio)),
-            "",
-            "### Health Probes",
-            self._format_markdown_field(LABEL_LIVENESS, self._to_markdown_code(liveness)),
-            self._format_markdown_field(LABEL_READINESS, self._to_markdown_code(readiness)),
-            self._format_markdown_field(LABEL_STARTUP, self._to_markdown_code(startup)),
-            "",
-            "### Availability",
-            self._format_markdown_field(LABEL_REPLICAS, self._to_markdown_code(replicas_text)),
-            self._format_markdown_field(LABEL_PDB, self._to_markdown_code(pdb_text)),
-            self._format_markdown_field(LABEL_PDB_TEMPLATE, self._to_markdown_code(pdb_template)),
-            self._format_markdown_field(LABEL_PDB_MIN, self._to_markdown_code(pdb_min)),
-            self._format_markdown_field(LABEL_PDB_MAX, self._to_markdown_code(pdb_max)),
-            self._format_markdown_field(LABEL_HPA, self._to_markdown_code("Not tracked")),
-            self._format_markdown_field(LABEL_ANTIAFFINITY, self._to_markdown_code(antiaffinity)),
-            self._format_markdown_field(LABEL_TOPOLOGY, self._to_markdown_code(topology)),
-        ]
-        return "\n".join(lines)
 
     @staticmethod
     def _build_values_content_markdown(content: str) -> str:

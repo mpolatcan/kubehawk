@@ -27,13 +27,13 @@ from contextlib import suppress
 from typing import Any
 
 from textual._context import NoActiveAppError
-from textual.containers import Container, Vertical
+from textual.containers import Container
 from textual.css.query import NoMatches, WrongType
 from textual.message import Message
 from textual.reactive import reactive
 from textual.worker import Worker, WorkerState
 
-from kubeagle.widgets import CustomLoadingIndicator, CustomStatic
+from kubeagle.widgets import CustomStatic
 
 logger = logging.getLogger(__name__)
 
@@ -340,21 +340,6 @@ class WorkerMixin:
             loading_text.update(message)
             loading_text.add_class("error-text")
 
-    def compose_loading_overlay(self) -> list[Any]:
-        """Compose standard loading overlay widgets.
-
-        Use this method in screen compose() to add standard loading UI.
-
-        Returns:
-            List of widgets for the loading overlay
-        """
-        return [
-            Vertical(
-                CustomLoadingIndicator(classes="loading", id="loading-indicator"),
-                CustomStatic("Loading...", classes="loading", id="loading-text"),
-                id="loading-row",
-            ),
-        ]
 
 
 # ============================================================================
@@ -404,13 +389,9 @@ class LoadingOverlay(Container):
             text.add_class("error-text")
 
 
-# Alias for backward compatibility
-DataLoadMixin = WorkerMixin
-
 __all__ = [
-    "DataLoadMixin",
-    "DataLoaded",
     "DataLoadFailed",
-    "WorkerMixin",
+    "DataLoaded",
     "LoadingOverlay",
+    "WorkerMixin",
 ]

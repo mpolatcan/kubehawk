@@ -57,11 +57,11 @@ def _claude_agent_sdk_available() -> bool:
     terminal takeover or other runtime environment changes cannot flip
     a previously-working import to False.
     """
-    global _CLAUDE_SDK_CHECKED, _CLAUDE_SDK_OK  # noqa: PLW0603
+    global _CLAUDE_SDK_CHECKED, _CLAUDE_SDK_OK
     if _CLAUDE_SDK_CHECKED:
         return _CLAUDE_SDK_OK
     try:
-        from claude_agent_sdk import query as _q  # noqa: F401
+        from claude_agent_sdk import query as _q
 
         _CLAUDE_SDK_OK = True
     except Exception:
@@ -473,12 +473,8 @@ def _collect_changed_paths(
     before: dict[str, str],
     after: dict[str, str],
 ) -> list[str]:
-    changed: list[str] = []
     keys = sorted(set(before) | set(after))
-    for key in keys:
-        if before.get(key) != after.get(key):
-            changed.append(key)
-    return changed
+    return [key for key in keys if before.get(key) != after.get(key)]
 
 
 def _tail_text(

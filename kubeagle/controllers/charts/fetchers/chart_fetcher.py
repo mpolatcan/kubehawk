@@ -34,6 +34,10 @@ class ChartFetcher:
     def find_chart_directories(self) -> list[Path]:
         """Find all chart directories in the repository.
 
+        Uses a lightweight values-file existence check instead of the full
+        ``find_values_files`` scan to avoid redundant glob + sort work that
+        will be repeated by ``_analyze_single_chart`` anyway.
+
         Returns:
             List of chart directory paths.
         """
@@ -46,13 +50,22 @@ class ChartFetcher:
             chart_dir = chart_file.parent
             if not self._is_valid_chart_dir(chart_dir):
                 continue
-            if not self.find_values_files(chart_dir):
+            if not self._has_any_values_file(chart_dir):
                 continue
             chart_dirs.append(chart_dir)
 
         return sorted(
             chart_dirs,
             key=lambda path: str(path.relative_to(self.repo_path)),
+        )
+
+    @staticmethod
+    def _has_any_values_file(chart_dir: Path) -> bool:
+        """Fast check for at least one values file without full glob + sort."""
+        return any(
+            f.is_file()
+            and (f.name == "values.yaml" or f.name.startswith("values-"))
+            for f in chart_dir.glob("values*.yaml")
         )
 
     def _is_valid_chart_dir(self, chart_dir: Path) -> bool:
@@ -100,6 +113,8 @@ class ChartFetcher:
             priority_index = len(cls._VALUES_FILE_PRIORITY)
         return priority_index, file_name
 
+    _MAX_VALUES_FILE_BYTES = 5 * 1024 * 1024  # 5 MB
+
     def parse_values_file(self, values_file: Path) -> dict[str, Any] | None:
         """Parse a values YAML file.
 
@@ -110,6 +125,9 @@ class ChartFetcher:
             Parsed YAML content or None on error.
         """
         try:
+            if values_file.stat().st_size > self._MAX_VALUES_FILE_BYTES:
+                logger.warning("Values file too large, skipping: %s", values_file)
+                return None
             with open(values_file) as f:
                 return yaml.safe_load(f)
         except Exception:

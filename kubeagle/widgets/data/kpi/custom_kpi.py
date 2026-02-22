@@ -13,6 +13,7 @@ from textual.reactive import reactive
 from textual.widgets import Static
 
 from kubeagle.widgets._base import StatefulWidget
+import contextlib
 
 # Spinner frames for the inline loading animation
 _SPINNER_FRAMES = ("   ", ".  ", ".. ", "...")
@@ -127,17 +128,30 @@ class CustomKPI(StatefulWidget):
         self._status = status
         self._spinner_timer = None
         self._spinner_frame = 0
+        self._spinner_widget: Static | None = None
+        self._value_widget: Static | None = None
 
     def on_mount(self) -> None:
-        """Apply initial status class on mount."""
+        """Apply initial status class on mount and cache child widget refs."""
         if self._status:
             self.add_css_class(self._status)
+        # Eagerly cache child widget references so hot paths avoid DOM traversal.
+        try:
+            self._value_widget = self.query_one(".kpi-value", Static)
+        except Exception:
+            self._value_widget = None
+        try:
+            self._spinner_widget = self.query_one(".kpi-spinner", Static)
+        except Exception:
+            self._spinner_widget = None
 
     def on_unmount(self) -> None:
-        """Stop spinner timer to prevent leaked timers after widget removal."""
+        """Stop spinner timer and clear cached refs to prevent leaks after widget removal."""
         if self._spinner_timer is not None:
             self._spinner_timer.stop()
             self._spinner_timer = None
+        self._spinner_widget = None
+        self._value_widget = None
 
     def compose(self) -> ComposeResult:
         """Compose the KPI widget."""
@@ -151,16 +165,33 @@ class CustomKPI(StatefulWidget):
             return self._title
         return f"{self._title}\n[dim]{self._subtitle}[/dim]"
 
+    def _get_value_widget(self) -> Static | None:
+        """Return cached value widget reference."""
+        if self._value_widget is None:
+            try:
+                self._value_widget = self.query_one(".kpi-value", Static)
+            except Exception:
+                return None
+        return self._value_widget
+
+    def _get_spinner_widget(self) -> Static | None:
+        """Return cached spinner widget reference."""
+        if self._spinner_widget is None:
+            try:
+                self._spinner_widget = self.query_one(".kpi-spinner", Static)
+            except Exception:
+                return None
+        return self._spinner_widget
+
     def watch_is_loading(self, loading: bool) -> None:
         """Update UI based on loading state.
 
         Args:
             loading: The new loading state.
         """
-        try:
-            value_widget = self.query_one(".kpi-value", Static)
-            spinner_widget = self.query_one(".kpi-spinner", Static)
-        except Exception:
+        value_widget = self._get_value_widget()
+        spinner_widget = self._get_spinner_widget()
+        if value_widget is None or spinner_widget is None:
             return
 
         if loading:
@@ -179,12 +210,11 @@ class CustomKPI(StatefulWidget):
 
     def _advance_spinner(self) -> None:
         """Advance the spinner animation frame."""
-        try:
-            spinner_widget = self.query_one(".kpi-spinner", Static)
-            self._spinner_frame = (self._spinner_frame + 1) % len(_SPINNER_FRAMES)
-            spinner_widget.update(_SPINNER_FRAMES[self._spinner_frame])
-        except Exception:
-            pass
+        spinner_widget = self._get_spinner_widget()
+        if spinner_widget is None:
+            return
+        self._spinner_frame = (self._spinner_frame + 1) % len(_SPINNER_FRAMES)
+        spinner_widget.update(_SPINNER_FRAMES[self._spinner_frame])
 
     def watch_data(self, data: list[dict]) -> None:
         """Update UI when data changes.
@@ -208,7 +238,9 @@ class CustomKPI(StatefulWidget):
         Args:
             value: The new value.
         """
-        self.query_one(".kpi-value", Static).update(value)
+        widget = self._get_value_widget()
+        if widget is not None:
+            widget.update(value)
 
     def set_value(self, value: str) -> None:
         """Set the KPI value and stop any loading spinner.
@@ -223,7 +255,8 @@ class CustomKPI(StatefulWidget):
     def set_subtitle(self, subtitle: str) -> None:
         """Set optional subtitle text rendered beneath the KPI title."""
         self._subtitle = subtitle
-        self.query_one(".kpi-title", Static).update(self._format_title())
+        with contextlib.suppress(Exception):
+            self.query_one(".kpi-title", Static).update(self._format_title())
 
     def set_status(self, status: str) -> None:
         """Set the KPI status.

@@ -129,7 +129,6 @@ class SettingsScreen(MainNavigationTabsMixin, BaseScreen):
     def __init__(self) -> None:
         super().__init__()
         self._settings: AppSettings = AppSettings()
-        self._status_message = ""
         self._status_class = ""
         self._dirty = False
         self._presenter: SettingsPresenter | None = None
@@ -484,7 +483,6 @@ class SettingsScreen(MainNavigationTabsMixin, BaseScreen):
 
     def _update_status(self, message: str, is_error: bool = False) -> None:
         """Update the status message displayed to the user."""
-        self._status_message = message
         self._status_class = "status-error" if is_error else "status-success"
         status_widget = self.query_one("#status-message", CustomStatic)
         if is_error and "\n" in message:
@@ -498,7 +496,6 @@ class SettingsScreen(MainNavigationTabsMixin, BaseScreen):
 
     def _clear_status(self) -> None:
         """Clear the status message."""
-        self._status_message = ""
         self._status_class = ""
         status_widget = self.query_one("#status-message", CustomStatic)
         status_widget.update("")

@@ -49,7 +49,6 @@ from __future__ import annotations
 
 import logging
 from abc import abstractmethod
-from collections.abc import Callable
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any, cast
 
@@ -237,67 +236,6 @@ class BaseScreen(Screen, ScreenNavigator):
     # DATATABLE HELPERS
     # =========================================================================
 
-    _TABLE_BATCH_INSERT_THRESHOLD = 500
-
-    def populate_data_table(
-        self,
-        table_id: str,
-        columns: list[str],
-        data: list[list],
-        sort_column: int = -1,
-    ) -> None:
-        """Populate a DataTable with columns and data.
-
-        For large datasets (>500 rows), rows are added in batches to
-        avoid blocking the UI event loop for extended periods.
-
-        Args:
-            table_id: The ID of the DataTable widget.
-            columns: List of column names.
-            data: List of rows, where each row is a list of cell values.
-            sort_column: Column index to sort by (-1 for no initial sort).
-        """
-        table = self.query_one(table_id, CustomDataTable)
-        table.clear(columns=True)
-
-        # Add columns
-        for col_name in columns:
-            table.add_column(col_name)
-
-        # Add rows - use batch insertion for large datasets
-        row_count = len(data)
-        if row_count > self._TABLE_BATCH_INSERT_THRESHOLD:
-            table.add_rows([tuple(row) for row in data])
-        else:
-            for row in data:
-                table.add_row(*row)
-
-        # Sort if requested
-        if sort_column >= 0 and sort_column < len(columns):
-            with suppress(Exception):
-                table.sort(columns[sort_column])
-
-    def show_empty_state(
-        self,
-        table_id: str,
-        columns: list[str],
-        message: str,
-        title: str = "OK",
-    ) -> None:
-        """Show an empty state in a DataTable.
-
-        Args:
-            table_id: The ID of the DataTable widget.
-            columns: List of column names.
-            message: The empty state message.
-            title: The title for the first column.
-        """
-        self.populate_data_table(
-            table_id,
-            columns,
-            [[title, message] + ["-"] * (len(columns) - 2)],
-        )
-
     def clear_table(self, table_id: str) -> None:
         """Clear a DataTable's data and columns.
 
@@ -311,61 +249,6 @@ class BaseScreen(Screen, ScreenNavigator):
     # =========================================================================
     # SEARCH/FILTER PATTERN
     # =========================================================================
-
-    def init_search_filter(
-        self,
-        filter_stats_id: str = "filter-stats",
-        search_indicator_id: str = "search-indicator",
-    ) -> None:
-        """Initialize search/filter widget references.
-
-        Call this from on_mount() after widgets are available.
-
-        Args:
-            filter_stats_id: ID of the filter stats Static widget.
-            search_indicator_id: ID of the search indicator Static widget.
-        """
-        with suppress(NoMatches, WrongType):
-            self._filter_stats = self.query_one(f"#{filter_stats_id}", CustomStatic)
-            self._search_indicator = self.query_one(f"#{search_indicator_id}", CustomStatic)
-            self.update_filter_stats()
-
-    def apply_search_filter(
-        self,
-        query: str,
-        data: list[Any],
-        search_columns: list[int],
-        accessor_func: Callable[[Any], str] | None = None,
-    ) -> list[Any]:
-        """Apply a search filter to data.
-
-        Args:
-            query: The search query string.
-            data: The data to filter.
-            search_columns: List of column indices to search.
-            accessor_func: Optional function to extract searchable text from item.
-                          If None, uses str() on the item.
-
-        Returns:
-            Filtered list of items.
-        """
-        if not query.strip():
-            return data
-
-        query_lower = query.lower()
-
-        if accessor_func:
-            return [item for item in data if query_lower in accessor_func(item).lower()]
-
-        return [
-            item
-            for item in data
-            if any(
-                query_lower in str(item[col]).lower()
-                for col in search_columns
-                if col < len(item)
-            )
-        ]
 
     def update_filter_stats(self, message: str | None = None) -> None:
         """Update the filter stats display.
@@ -396,45 +279,10 @@ class BaseScreen(Screen, ScreenNavigator):
             else:
                 self._search_indicator.remove_class("active")
 
-    def set_search_query(self, query: str) -> None:
-        """Set the current search query and update display.
-
-        Args:
-            query: The search query string.
-        """
-        self.search_query = query
-        self.update_filter_stats()
-
     def clear_search(self) -> None:
         """Clear the current search query."""
         self.search_query = ""
         self.update_filter_stats()
-
-    # =========================================================================
-    # SUMMARY BAR HELPERS
-    # =========================================================================
-
-    def update_summary_bar(
-        self,
-        title: str,
-        stats: list[tuple[str, str]],
-        summary_id: str = "summary-bar",
-    ) -> None:
-        """Update the summary bar with a title and stats.
-
-        Args:
-            title: The summary title.
-            stats: List of (css_class, text) tuples for stats.
-            summary_id: ID of the summary Static widget.
-        """
-        with suppress(NoMatches, WrongType):
-            summary_bar = self.query_one(f"#{summary_id}", CustomStatic)
-            title_html = f'<span id="summary-title">{title}</span>'
-            stats_parts = [f'<span class="{css}">{text}</span>' for css, text in stats]
-            stats_html = "<br/>".join(stats_parts)
-            summary_bar.update(
-                f'{title_html}<br/><span id="summary-stats">{stats_html}</span>'
-            )
 
     # =========================================================================
     # REFRESH ACTION

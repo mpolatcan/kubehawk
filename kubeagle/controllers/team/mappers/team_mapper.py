@@ -19,7 +19,7 @@ from kubeagle.models.teams.team_info import TeamInfo
 class TeamMapper:
     """Map chart directories to teams using CODEOWNERS file."""
 
-    __slots__ = ("teams", "team_mapping", "_codeowners_path", "_loaded", "_load_lock")
+    __slots__ = ("_codeowners_path", "_load_lock", "_loaded", "team_mapping", "teams")
     _VALUES_FILE_CANDIDATES = (
         "values-automation.yaml",
         "values.yaml",
@@ -105,14 +105,12 @@ class TeamMapper:
                             if github_match:
                                 team_name = github_match.group(1)
                                 if "/" in team_name:
-                                    current_team = (
+                                    current_team = self._normalize_team_name(
                                         team_name.split("/")[-1]
-                                        .replace("-", " ")
-                                        .title()
                                     )
                                     current_team_ref = team_name
                                 else:
-                                    current_team = team_name.replace("-", " ").title()
+                                    current_team = self._normalize_team_name(team_name)
                                     current_team_ref = team_name
                         continue
 
@@ -174,9 +172,18 @@ class TeamMapper:
         return owners
 
     def _normalize_name(self, name: str) -> str:
-        """Normalize a name for consistent display."""
-        name = name.lstrip("@")
-        return name.replace("_", "-").title()
+        """Normalize a name for consistent display.
+
+        Short all-uppercase acronyms (QA, AI, SRE) are preserved as-is.
+        Longer segments get title-cased for readability.
+        """
+        name = name.lstrip("@").replace("_", "-")
+        parts = name.split("-")
+        normalized_parts = [
+            part if (part.isupper() and len(part) <= 3) else part.title()
+            for part in parts
+        ]
+        return "-".join(normalized_parts)
 
     def _normalize_team_name(self, name: str) -> str:
         """Normalize a team name for consistent display."""
@@ -199,7 +206,12 @@ class TeamMapper:
         return self._normalize_name(owner)
 
     def get_team_for_path(self, chart_path: Path) -> str | None:
-        """Get team name for a chart path."""
+        """Get team name for a chart path.
+
+        Checks chart name first, then parent directory names to support
+        CODEOWNERS directory-level patterns like ``/mobile/`` covering all
+        nested charts under that directory.
+        """
         self._ensure_loaded()
         chart_name = chart_path.name
 
@@ -216,7 +228,20 @@ class TeamMapper:
                     best_match = team
                     best_match_length = match_length
 
-        return best_match
+        if best_match is not None:
+            return best_match
+
+        # Check parent directory names against directory-level CODEOWNERS
+        # patterns.  This handles nested charts like ``mobile/aconsumer``
+        # where ``/mobile/`` is mapped to "Mobile" in CODEOWNERS.
+        for parent in chart_path.parents:
+            parent_name = parent.name
+            if not parent_name:
+                break
+            if parent_name in self.team_mapping:
+                return self.team_mapping[parent_name]
+
+        return None
 
     def get_team(self, chart_name: str) -> str:
         """Get team name for a chart by name."""
@@ -230,7 +255,11 @@ class TeamMapper:
         chart_path: Path | None = None,
         values_file: Path | None = None,
     ) -> str:
-        """Resolve chart team from values, CODEOWNERS, then sibling heuristics."""
+        """Resolve chart team from values, CODEOWNERS, then sibling heuristics.
+
+        Values-file teams take priority over CODEOWNERS because they represent
+        the explicit team assignment chosen by the chart author.
+        """
         self._ensure_loaded()
 
         team_from_values = self._extract_team_from_values_dict(values)
@@ -241,7 +270,15 @@ class TeamMapper:
             )
 
         if team_from_values is not None:
-            return self.register_chart_team(chart_name, team_from_values)
+            # Values-file team takes priority — force-update the mapping
+            # so downstream code sees the correct team even if CODEOWNERS
+            # had a different assignment.
+            normalized_team = self._normalize_team_name(team_from_values)
+            normalized_chart = chart_name.strip()
+            if normalized_chart and normalized_team:
+                with self._load_lock:
+                    self.team_mapping[normalized_chart] = normalized_team
+            return normalized_team
 
         codeowners_team: str | None = None
         if chart_path is not None:

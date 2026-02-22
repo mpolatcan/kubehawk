@@ -1062,7 +1062,6 @@ class TestClusterController:
         assert kinds == {"Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob"}
         deployment = next(row for row in rows if row.name == "api")
         assert deployment.has_pdb is True
-        assert deployment.managed_by_helm is True
         assert deployment.helm_release == "rel-api"
         assert deployment.cpu_request == 200.0
         assert deployment.cpu_limit == 500.0
@@ -1978,15 +1977,6 @@ class TestClusterController:
         assert row.pod_real_cpu_max == "250m (6.2%)"
         assert row.pod_real_cpu_avg == "175m (5.6%)"
         assert row.pod_real_memory_avg == "768.0Mi (12%)"
-        assert row.neighbor_cpu_req_pressure_max == "60%"
-        assert row.neighbor_cpu_req_pressure_avg == "50%"
-        assert row.neighbor_cpu_lim_pressure_max == "20%"
-        assert row.neighbor_cpu_lim_pressure_avg == "10%"
-        assert row.neighbor_mem_req_pressure_max == "48%"
-        assert row.neighbor_mem_req_pressure_avg == "38%"
-        assert row.neighbor_mem_lim_pressure_max == "5.0%"
-        assert row.neighbor_mem_lim_pressure_avg == "2.5%"
-
         assert len(row.assigned_node_details) == 2
         node_a_detail = next(
             detail for detail in row.assigned_node_details if detail.node_name == "node-a"
@@ -2118,10 +2108,6 @@ class TestClusterController:
         assert row.node_real_memory_avg == "-"
         assert row.pod_real_cpu_avg == "-"
         assert row.pod_real_memory_avg == "-"
-        assert row.neighbor_cpu_req_pressure_avg == "-"
-        assert row.neighbor_cpu_lim_pressure_avg == "-"
-        assert row.neighbor_mem_req_pressure_avg == "-"
-        assert row.neighbor_mem_lim_pressure_avg == "-"
         assert len(row.assigned_node_details) == 1
         assert len(row.assigned_pod_details) == 1
         assert row.assigned_pod_details[0].pod_cpu_pct_of_node_allocatable is None

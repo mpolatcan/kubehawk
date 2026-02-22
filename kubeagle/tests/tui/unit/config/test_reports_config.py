@@ -1,8 +1,9 @@
 """Unit tests for Reports screen configuration constants.
 
 This module tests:
-- Report format/type/output option lists
 - Default value constants
+- Responsive breakpoint constants
+- Preview and feedback constants
 
 All constants are imported from screens.reports.config.
 """
@@ -13,50 +14,12 @@ from kubeagle.screens.reports.config import (
     DEFAULT_FILENAME,
     DEFAULT_REPORT_FORMAT,
     DEFAULT_REPORT_TYPE,
-    REPORT_FORMATS,
-    REPORT_TYPES,
+    PREVIEW_CHAR_LIMIT,
+    REPORT_EXPORT_MEDIUM_MIN_WIDTH,
+    REPORT_EXPORT_SHORT_MIN_HEIGHT,
+    REPORT_EXPORT_WIDE_MIN_WIDTH,
+    STATUS_CLEAR_DELAY,
 )
-
-# =============================================================================
-# Report Format/Type/Output Tests
-# =============================================================================
-
-
-class TestReportsConfigFormats:
-    """Test reports config format, type, and output option lists."""
-
-    def test_report_formats_count(self) -> None:
-        """Test REPORT_FORMATS has 3 items."""
-        assert len(REPORT_FORMATS) == 3
-
-    def test_report_formats_expected_values(self) -> None:
-        """Test REPORT_FORMATS contains expected values."""
-        assert "full" in REPORT_FORMATS
-        assert "brief" in REPORT_FORMATS
-        assert "summary" in REPORT_FORMATS
-
-    def test_report_formats_all_strings(self) -> None:
-        """Test all REPORT_FORMATS entries are non-empty strings."""
-        for fmt in REPORT_FORMATS:
-            assert isinstance(fmt, str)
-            assert len(fmt) > 0
-
-    def test_report_types_count(self) -> None:
-        """Test REPORT_TYPES has 3 items."""
-        assert len(REPORT_TYPES) == 3
-
-    def test_report_types_expected_values(self) -> None:
-        """Test REPORT_TYPES contains expected values."""
-        assert "eks" in REPORT_TYPES
-        assert "charts" in REPORT_TYPES
-        assert "combined" in REPORT_TYPES
-
-    def test_report_types_all_strings(self) -> None:
-        """Test all REPORT_TYPES entries are non-empty strings."""
-        for rt in REPORT_TYPES:
-            assert isinstance(rt, str)
-            assert len(rt) > 0
-
 
 # =============================================================================
 # Default Value Tests
@@ -70,17 +33,9 @@ class TestReportsConfigDefaults:
         """Test DEFAULT_REPORT_FORMAT has expected value."""
         assert DEFAULT_REPORT_FORMAT == "full"
 
-    def test_default_report_format_in_formats(self) -> None:
-        """Test DEFAULT_REPORT_FORMAT is in REPORT_FORMATS."""
-        assert DEFAULT_REPORT_FORMAT in REPORT_FORMATS
-
     def test_default_report_type_value(self) -> None:
         """Test DEFAULT_REPORT_TYPE has expected value."""
         assert DEFAULT_REPORT_TYPE == "combined"
-
-    def test_default_report_type_in_types(self) -> None:
-        """Test DEFAULT_REPORT_TYPE is in REPORT_TYPES."""
-        assert DEFAULT_REPORT_TYPE in REPORT_TYPES
 
     def test_default_filename_value(self) -> None:
         """Test DEFAULT_FILENAME has expected value."""
@@ -97,10 +52,65 @@ class TestReportsConfigDefaults:
 
 
 # =============================================================================
+# Responsive Breakpoint Tests
+# =============================================================================
+
+
+class TestReportsConfigBreakpoints:
+    """Test reports config responsive breakpoint constants."""
+
+    def test_wide_min_width_value(self) -> None:
+        """Test REPORT_EXPORT_WIDE_MIN_WIDTH has expected value."""
+        assert REPORT_EXPORT_WIDE_MIN_WIDTH == 140
+
+    def test_medium_min_width_value(self) -> None:
+        """Test REPORT_EXPORT_MEDIUM_MIN_WIDTH has expected value."""
+        assert REPORT_EXPORT_MEDIUM_MIN_WIDTH == 100
+
+    def test_short_min_height_value(self) -> None:
+        """Test REPORT_EXPORT_SHORT_MIN_HEIGHT has expected value."""
+        assert REPORT_EXPORT_SHORT_MIN_HEIGHT == 34
+
+    def test_breakpoints_are_positive(self) -> None:
+        """Test all breakpoint values are positive integers."""
+        for val in (REPORT_EXPORT_WIDE_MIN_WIDTH, REPORT_EXPORT_MEDIUM_MIN_WIDTH, REPORT_EXPORT_SHORT_MIN_HEIGHT):
+            assert isinstance(val, int)
+            assert val > 0
+
+
+# =============================================================================
+# Preview / Feedback Tests
+# =============================================================================
+
+
+class TestReportsConfigPreview:
+    """Test reports config preview and feedback constants."""
+
+    def test_preview_char_limit_value(self) -> None:
+        """Test PREVIEW_CHAR_LIMIT has expected value."""
+        assert PREVIEW_CHAR_LIMIT == 5000
+
+    def test_status_clear_delay_value(self) -> None:
+        """Test STATUS_CLEAR_DELAY has expected value."""
+        assert STATUS_CLEAR_DELAY == 5.0
+
+    def test_preview_char_limit_positive(self) -> None:
+        """Test PREVIEW_CHAR_LIMIT is a positive integer."""
+        assert isinstance(PREVIEW_CHAR_LIMIT, int)
+        assert PREVIEW_CHAR_LIMIT > 0
+
+    def test_status_clear_delay_positive(self) -> None:
+        """Test STATUS_CLEAR_DELAY is a positive float."""
+        assert isinstance(STATUS_CLEAR_DELAY, float)
+        assert STATUS_CLEAR_DELAY > 0
+
+
+# =============================================================================
 # Exports
 # =============================================================================
 
 __all__ = [
-    "TestReportsConfigFormats",
+    "TestReportsConfigBreakpoints",
     "TestReportsConfigDefaults",
+    "TestReportsConfigPreview",
 ]

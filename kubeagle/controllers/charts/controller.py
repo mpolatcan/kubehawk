@@ -6,6 +6,7 @@ import asyncio
 import logging
 import subprocess
 import time
+from collections import OrderedDict
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
@@ -33,10 +34,10 @@ class ChartsController(BaseController):
     _LIVE_VALUES_CACHE_MAX_ENTRIES = 128  # Prevent unbounded memory growth
     _CLUSTER_ANALYSIS_CONCURRENCY_CAP = 16
     _CLUSTER_ANALYSIS_CONCURRENCY_MULTIPLIER = 2
-    _global_charts_cache: dict[
+    _global_charts_cache: OrderedDict[
         tuple[str, str, frozenset[str] | None],
         tuple[float, list[ChartInfo]],
-    ] = {}
+    ] = OrderedDict()
 
     def __init__(
         self,
@@ -85,7 +86,7 @@ class ChartsController(BaseController):
         self._charts_cache: list[ChartInfo] | None = None
         self._charts_cache_lock = asyncio.Lock()
         self._analysis_in_progress: asyncio.Event | None = None  # Prevents duplicate analyses
-        self._live_values_output_cache: dict[tuple[str, str], str] = {}
+        self._live_values_output_cache: OrderedDict[tuple[str, str], str] = OrderedDict()
 
     @property
     def repo_path(self) -> Path:
@@ -148,11 +149,11 @@ class ChartsController(BaseController):
             if self._codeowners_path is not None
             else ""
         )
-        self.__class__._global_charts_cache = {
-            key: value
+        self.__class__._global_charts_cache = OrderedDict(
+            (key, value)
             for key, value in self._global_charts_cache.items()
             if key[0] != repo_key or key[1] != codeowners_key
-        }
+        )
 
         logger.debug("ChartsController cache invalidated")
 
@@ -185,6 +186,7 @@ class ChartsController(BaseController):
         if time.monotonic() - cached_at > self._GLOBAL_CACHE_TTL_SECONDS:
             self._global_charts_cache.pop(key, None)
             return None
+        self._global_charts_cache.move_to_end(key)
         return list(charts)
 
     def _set_global_cached_charts(
@@ -194,14 +196,12 @@ class ChartsController(BaseController):
     ) -> None:
         """Store shared chart-analysis cache snapshot with LRU eviction."""
         key = self._global_cache_key(active_releases)
+        # If key already exists, remove it first so re-insertion places it at the end
+        self._global_charts_cache.pop(key, None)
         self._global_charts_cache[key] = (time.monotonic(), list(charts))
-        # Evict oldest entries when cache exceeds max size
-        if len(self._global_charts_cache) > self._GLOBAL_CACHE_MAX_ENTRIES:
-            oldest_key = min(
-                self._global_charts_cache,
-                key=lambda k: self._global_charts_cache[k][0],
-            )
-            self._global_charts_cache.pop(oldest_key, None)
+        # Evict least-recently-used entry when cache exceeds max size
+        while len(self._global_charts_cache) > self._GLOBAL_CACHE_MAX_ENTRIES:
+            self._global_charts_cache.popitem(last=False)
 
     async def analyze_all_charts_async(
         self,
@@ -340,9 +340,8 @@ class ChartsController(BaseController):
         loop = asyncio.get_running_loop()
         total = len(chart_dirs)
         results_by_index: dict[int, list[ChartInfo]] = {}
-        # Maintain a running snapshot to avoid O(n²) rebuild on each callback.
+        # Maintain a running snapshot to avoid O(n^2) rebuild on each callback.
         accumulated_snapshot: list[ChartInfo] = []
-        snapshot_built_up_to: set[int] = set()
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             async def _analyze_with_index(
@@ -367,10 +366,8 @@ class ChartsController(BaseController):
                         results_by_index[index] = result
                         if on_analysis_partial is not None:
                             try:
-                                # Incrementally extend snapshot with newly completed indices.
-                                for idx in sorted(results_by_index.keys() - snapshot_built_up_to):
-                                    accumulated_snapshot.extend(results_by_index[idx])
-                                    snapshot_built_up_to.add(idx)
+                                # Directly extend snapshot with the just-completed result.
+                                accumulated_snapshot.extend(result)
                                 on_analysis_partial(accumulated_snapshot, completed, total)
                             except Exception:
                                 logger.debug(
@@ -525,11 +522,13 @@ class ChartsController(BaseController):
         )
         cache_key = (release, namespace)
         if raw_output:
+            # Move to end if already present, then set value (LRU promotion)
+            if cache_key in self._live_values_output_cache:
+                self._live_values_output_cache.move_to_end(cache_key)
             self._live_values_output_cache[cache_key] = raw_output
-            # Evict oldest entries (FIFO) when cache exceeds max size
+            # Evict least-recently-used entries when cache exceeds max size
             while len(self._live_values_output_cache) > self._LIVE_VALUES_CACHE_MAX_ENTRIES:
-                first_key = next(iter(self._live_values_output_cache))
-                self._live_values_output_cache.pop(first_key, None)
+                self._live_values_output_cache.popitem(last=False)
         else:
             self._live_values_output_cache.pop(cache_key, None)
         return values

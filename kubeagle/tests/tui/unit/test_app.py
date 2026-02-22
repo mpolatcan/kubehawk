@@ -228,18 +228,6 @@ class TestAppMethodsExist:
         assert hasattr(app, "action_back")
         assert callable(app.action_back)
 
-    def test_has_action_nav_charts_by_values_file(self) -> None:
-        """App must implement action_nav_charts_by_values_file."""
-        app = EKSHelmReporterApp()
-        assert hasattr(app, "action_nav_charts_by_values_file")
-        assert callable(app.action_nav_charts_by_values_file)
-
-    def test_has_action_nav_charts_without_pdb(self) -> None:
-        """App must implement action_nav_charts_without_pdb."""
-        app = EKSHelmReporterApp()
-        assert hasattr(app, "action_nav_charts_without_pdb")
-        assert callable(app.action_nav_charts_without_pdb)
-
 
 # =============================================================================
 # Settings
@@ -503,11 +491,11 @@ class TestNavigationRegression:
 # =============================================================================
 
 __all__ = [
+    "TestAppBindingCoverage",
     "TestAppClassAttributes",
     "TestAppInstantiation",
     "TestAppMethodsExist",
     "TestAppSettings",
-    "TestTerminalSizePolicy",
-    "TestAppBindingCoverage",
     "TestNavigationRegression",
+    "TestTerminalSizePolicy",
 ]
