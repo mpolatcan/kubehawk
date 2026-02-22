@@ -1155,6 +1155,8 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
         self._cached_search_input: CustomInput | None = None
         self._last_partial_table_repaint_monotonic: float = 0.0
         self._last_partial_table_repaint_chart_count: int = 0
+        self._sync_charts_state_seq = 0
+        self._apply_filters_seq = 0
 
     @classmethod
     def _partial_update_step(cls, total: int) -> int:
@@ -1803,8 +1805,13 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
             self._focus_table()
             return
 
-        self._ensure_violations_view_initialized()
-        self._ensure_optimizer_data_loaded()
+        # Defer heavy initialisation/data-load to let the ContentSwitcher
+        # render the tab switch immediately, preventing perceived freezes.
+        def _deferred_violations_init() -> None:
+            self._ensure_violations_view_initialized()
+            self._ensure_optimizer_data_loaded()
+
+        self.call_later(_deferred_violations_init)
 
     def _schedule_charts_tab_repopulate(self, *, force: bool = False) -> None:
         """Defer charts-table repaint so tab switch renders immediately."""
@@ -2021,6 +2028,7 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
                 self.call_later(
                     self._update_optimizer_loading_message,
                     "Analyzing charts...",
+                    5,
                 )
                 from kubeagle.controllers import ChartsController
 
@@ -2094,11 +2102,13 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
                         "Using cached violations "
                         f"({len(all_violations)} findings across {total} charts)..."
                     ),
+                    60,
                 )
             else:
                 self.call_later(
                     self._update_optimizer_loading_message,
                     f"Checking violations across {total} chart(s)...",
+                    10,
                 )
                 from kubeagle.models.optimization import (
                     UnifiedOptimizerController,
@@ -2237,6 +2247,7 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
                 self.call_later(
                     self._update_optimizer_loading_message,
                     "Building recommendations...",
+                    70,
                 )
                 helm_recs = await asyncio.to_thread(
                     build_helm_recommendations,
@@ -2266,6 +2277,7 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
                 self.call_later(
                     self._update_optimizer_loading_message,
                     "Collecting cluster recommendations...",
+                    85,
                 )
                 try:
                     cluster_recs = await asyncio.wait_for(
@@ -2317,13 +2329,17 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
                 with contextlib.suppress(asyncio.CancelledError):
                     await cluster_recs_task
 
-    def _update_optimizer_loading_message(self, message: str) -> None:
+    def _update_optimizer_loading_message(
+        self, message: str, progress_percent: int | None = None,
+    ) -> None:
         if not self.is_current:
             return
         with contextlib.suppress(Exception):
             self.query_one("#violations-view", ViolationsView).update_loading_message(
                 message,
             )
+        if progress_percent is not None:
+            self._set_charts_progress(progress_percent, message)
 
     def on_charts_explorer_optimizer_partial_loaded(
         self,
@@ -2343,7 +2359,11 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
             f"({event.completed_charts}/{event.total_charts} charts, "
             f"{len(self._streaming_optimizer_violations)} findings)"
         )
-        self._update_optimizer_loading_message(progress_message)
+        # Map violation checking to 10-65% of progress bar
+        violation_pct = 10
+        if event.total_charts > 0:
+            violation_pct = 10 + int((event.completed_charts / event.total_charts) * 55)
+        self._update_optimizer_loading_message(progress_message, violation_pct)
         if not self.is_current:
             return
         if self._active_tab != TAB_VIOLATIONS:
@@ -2393,6 +2413,7 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
         self._optimizer_loaded = True
         self._streaming_optimizer_violations = list(event.violations)
         self._streaming_optimizer_charts = list(event.charts)
+        self._set_charts_progress(100, "Ready")
         try:
             vv = self.query_one("#violations-view", ViolationsView)
             vv.set_table_loading(False)
@@ -2418,6 +2439,7 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
         self._optimizer_loaded = False
         self._streaming_optimizer_violations = []
         self._streaming_optimizer_charts = []
+        self._set_charts_progress(100, "Error", is_error=True)
         with contextlib.suppress(Exception):
             vv = self.query_one("#violations-view", ViolationsView)
             vv.show_error(event.error)
@@ -2961,51 +2983,85 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
         *,
         partial_update: bool = False,
     ) -> None:
-        """Sync screen state from a fresh charts payload."""
+        """Sync screen state from a fresh charts payload.
+
+        Heavy index-building and set-comprehension work is offloaded to a
+        background thread via ``asyncio.to_thread`` so the main Textual event
+        loop stays responsive.  A monotonic sequence counter
+        (``_sync_charts_state_seq``) guards against stale results when
+        multiple loads overlap.
+        """
         self.charts = charts
         self._charts_load_generation += 1
         self._active_charts = active_charts
+        self._sync_charts_state_seq += 1
+        seq = self._sync_charts_state_seq
+
         if partial_update:
-            self._extend_chart_runtime_indexes(self.charts)
+            async def _do_partial_sync() -> None:
+                if self._sync_charts_state_seq != seq:
+                    return
+                await asyncio.to_thread(self._extend_chart_runtime_indexes, charts)
+
+            self.call_later(_do_partial_sync)
             return
-        self._rebuild_chart_runtime_indexes()
 
-        teams = sorted({c.team for c in self.charts})
-        self._team_filter_options = tuple((team, team) for team in teams)
-        valid_team_values = {value for _, value in self._team_filter_options}
-        self._team_filter_values = {
-            value for value in self._team_filter_values if value in valid_team_values
-        }
-        if self._team_filter_values == valid_team_values:
-            self._team_filter_values = set()
+        # Snapshot current filter values for the closure (avoid reading
+        # mutable screen state from a worker thread).
+        prev_team_filter = set(self._team_filter_values)
+        prev_qos_filter = set(self._qos_filter_values)
+        prev_vft_filter = set(self._values_file_type_filter_values)
+        classify_fn = self._chart_values_file_type
 
-        qos_values = sorted({c.qos_class.value for c in self.charts})
-        self._qos_filter_options = tuple((qos, qos) for qos in qos_values)
-        valid_qos_values = {value for _, value in self._qos_filter_options}
-        self._qos_filter_values = {
-            value for value in self._qos_filter_values if value in valid_qos_values
-        }
-        if self._qos_filter_values == valid_qos_values:
-            self._qos_filter_values = set()
+        async def _do_full_sync() -> None:
+            if self._sync_charts_state_seq != seq:
+                return
 
-        values_file_type_values = sorted(
-            {self._chart_values_file_type(c) for c in self.charts}
-        )
-        self._values_file_type_filter_options = tuple(
-            (value_type, value_type) for value_type in values_file_type_values
-        )
-        valid_values_file_type_values = {
-            value for _, value in self._values_file_type_filter_options
-        }
-        self._values_file_type_filter_values = {
-            value
-            for value in self._values_file_type_filter_values
-            if value in valid_values_file_type_values
-        }
-        if self._values_file_type_filter_values == valid_values_file_type_values:
-            self._values_file_type_filter_values = set()
+            def _heavy() -> tuple[
+                list[str], list[str], list[str],
+            ]:
+                self._rebuild_chart_runtime_indexes()
+                teams = sorted({c.team for c in charts})
+                qos_vals = sorted({c.qos_class.value for c in charts})
+                vft_vals = sorted({classify_fn(c) for c in charts})
+                return teams, qos_vals, vft_vals
 
-        self._sync_current_team_from_filter()
+            teams, qos_values, vft_values = await asyncio.to_thread(_heavy)
+
+            # Staleness check after thread work completes
+            if self._sync_charts_state_seq != seq:
+                return
+
+            # Apply filter options on the main thread (fast UI state updates)
+            self._team_filter_options = tuple((t, t) for t in teams)
+            valid_team_values = {v for _, v in self._team_filter_options}
+            self._team_filter_values = {
+                v for v in prev_team_filter if v in valid_team_values
+            }
+            if self._team_filter_values == valid_team_values:
+                self._team_filter_values = set()
+
+            self._qos_filter_options = tuple((q, q) for q in qos_values)
+            valid_qos_values = {v for _, v in self._qos_filter_options}
+            self._qos_filter_values = {
+                v for v in prev_qos_filter if v in valid_qos_values
+            }
+            if self._qos_filter_values == valid_qos_values:
+                self._qos_filter_values = set()
+
+            self._values_file_type_filter_options = tuple(
+                (vt, vt) for vt in vft_values
+            )
+            valid_vft_values = {v for _, v in self._values_file_type_filter_options}
+            self._values_file_type_filter_values = {
+                v for v in prev_vft_filter if v in valid_vft_values
+            }
+            if self._values_file_type_filter_values == valid_vft_values:
+                self._values_file_type_filter_values = set()
+
+            self._sync_current_team_from_filter()
+
+        self.call_later(_do_full_sync)
 
     def on_charts_explorer_partial_data_loaded(
         self,
@@ -3125,14 +3181,22 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
     # =========================================================================
 
     def _apply_filters_and_populate(self, *, force: bool = False) -> None:
-        """Apply all filters and repopulate the table."""
+        """Apply all filters and repopulate the table.
+
+        The heavy filtering and sorting work is offloaded to a background
+        thread via ``asyncio.to_thread`` so the main Textual event loop
+        stays responsive.  A monotonic sequence counter
+        (``_apply_filters_seq``) guards against stale results when rapid
+        successive calls overlap.
+        """
         if not self.charts:
             self._clear_selected_chart()
             return
         if self._active_tab != TAB_CHARTS:
             return
 
-        # Get search query from cached ref or DOM fallback
+        # Get search query from cached ref or DOM fallback (must stay on
+        # main thread because it reads from the DOM widget tree).
         search_query = ""
         search_ref = getattr(self, "_cached_search_input", None)
         if search_ref is not None:
@@ -3166,51 +3230,82 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
             return
         self._last_filter_signature = render_signature
 
-        # Apply all filters in a single pass after presenter pre-filter
-        self.filtered_charts = self._presenter.apply_filters(
-            self.charts,
-            self.current_view,
-            self._team_filter_values,
-            "",
-            self.show_active_only,
-            self._active_charts,
-        )
-        # Combine search + QoS + values-file-type into one pass
-        has_search = bool(normalized_query)
-        has_qos = bool(self._qos_filter_values)
-        has_vft = bool(self._values_file_type_filter_values)
-        if has_search or has_qos or has_vft:
-            qos_values = self._qos_filter_values
-            vft_values = self._values_file_type_filter_values
-            combined = []
-            for chart in self.filtered_charts:
-                if has_search and normalized_query not in self._chart_search_haystack(chart):
-                    continue
-                if has_qos and chart.qos_class.value not in qos_values:
-                    continue
-                if has_vft and self._chart_values_file_type(chart) not in vft_values:
-                    continue
-                combined.append(chart)
-            self.filtered_charts = combined
+        # Bump sequence to invalidate any in-flight async filter/sort work.
+        self._apply_filters_seq += 1
+        seq = self._apply_filters_seq
 
-        if self._violations_required_for_charts_table():
-            self._ensure_violation_counts_available()
+        # Snapshot all values the background thread needs so we never read
+        # mutable screen state from a worker thread.
+        charts_snapshot = self.charts
+        current_view = self.current_view
+        team_filter_values = set(self._team_filter_values)
+        show_active_only = self.show_active_only
+        qos_filter_values = set(self._qos_filter_values)
+        vft_filter_values = set(self._values_file_type_filter_values)
+        current_sort = self.current_sort
+        sort_desc = self.sort_desc
+        presenter = self._presenter
+        search_haystack_fn = self._chart_search_haystack
+        vft_fn = self._chart_values_file_type
 
-        sorted_filtered_charts = self._presenter.sort_charts(
-            self.filtered_charts,
-            sort_by=self.current_sort,
-            descending=self.sort_desc,
-        )
+        # Check violations requirement before going async
+        needs_violations = self._violations_required_for_charts_table()
 
-        # Populate table — defer row formatting to async _do_populate
-        self._populate_table(sorted_charts=sorted_filtered_charts)
+        async def _do_apply() -> None:
+            if self._apply_filters_seq != seq:
+                return
 
-        # Update summary
-        self._update_summary()
-        self._update_sort_direction_button()
+            def _heavy() -> tuple[list[ChartInfo], list[ChartInfo]]:
+                filtered = presenter.apply_filters(
+                    charts_snapshot,
+                    current_view,
+                    team_filter_values,
+                    "",
+                    show_active_only,
+                    active_charts,
+                )
+                # Combine search + QoS + values-file-type into one pass
+                has_search = bool(normalized_query)
+                has_qos = bool(qos_filter_values)
+                has_vft = bool(vft_filter_values)
+                if has_search or has_qos or has_vft:
+                    combined: list[ChartInfo] = []
+                    for chart in filtered:
+                        if has_search and normalized_query not in search_haystack_fn(chart):
+                            continue
+                        if has_qos and chart.qos_class.value not in qos_filter_values:
+                            continue
+                        if has_vft and vft_fn(chart) not in vft_filter_values:
+                            continue
+                        combined.append(chart)
+                    filtered = combined
+                sorted_charts = presenter.sort_charts(
+                    filtered,
+                    sort_by=current_sort,
+                    descending=sort_desc,
+                )
+                return filtered, sorted_charts
 
-        if not self.filtered_charts:
-            self._clear_selected_chart()
+            filtered, sorted_charts = await asyncio.to_thread(_heavy)
+
+            # Staleness check after thread work completes
+            if self._apply_filters_seq != seq:
+                return
+
+            self.filtered_charts = filtered
+
+            if needs_violations:
+                self._ensure_violation_counts_available()
+
+            # Populate table + UI updates on main thread
+            self._populate_table(sorted_charts=sorted_charts)
+            self._update_summary()
+            self._update_sort_direction_button()
+
+            if not self.filtered_charts:
+                self._clear_selected_chart()
+
+        self.call_later(_do_apply)
 
     def _populate_table(
         self,

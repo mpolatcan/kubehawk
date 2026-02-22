@@ -676,10 +676,14 @@ class RecommendationsView(CustomVertical):
                     "rec-selected",
                 )
 
-        self._rebuild_filter_options()
-        self._update_kpi_counts()
-        self.set_loading(False)
-        self._apply_filters()
+        # Defer filter rebuild + tree population so tab switches stay responsive
+        def _deferred_filters() -> None:
+            self._rebuild_filter_options()
+            self._update_kpi_counts()
+            self.set_loading(False)
+            self._apply_filters()
+
+        self.call_later(_deferred_filters)
 
     @staticmethod
     def _recommendation_identity(rec: dict[str, Any] | None) -> tuple[str, str, str]:

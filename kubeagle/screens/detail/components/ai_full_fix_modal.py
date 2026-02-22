@@ -502,8 +502,13 @@ class AIFullFixModal(ModalScreen[AIFullFixModalResult | None]):
 
     def on_mount(self) -> None:
         self._apply_dynamic_layout()
-        self._configure_editor_highlighting()
         self._sync_action_buttons_state()
+        # Defer editor highlighting so the modal shell renders immediately.
+        self.call_later(self._deferred_on_mount)
+
+    def _deferred_on_mount(self) -> None:
+        """Run editor highlighting after the modal shell is visible."""
+        self._configure_editor_highlighting()
         with contextlib.suppress(Exception):
             self.query_one("#ai-full-fix-values-editor", TextArea).focus()
 
@@ -713,6 +718,7 @@ class AIFullFixBulkModal(ModalScreen[AIFullFixBulkModalResult | None]):
         self._pulse_timer: Timer | None = None
         self._bulk_fix_started_at_monotonic: float | None = None
         self._bulk_last_elapsed_seconds: float | None = None
+        self._ui_update_seq: int = 0
         started_at = time.monotonic()
         for bundle in self._bundles.values():
             if bundle.is_processing:
@@ -798,13 +804,21 @@ class AIFullFixBulkModal(ModalScreen[AIFullFixBulkModalResult | None]):
 
     def on_mount(self) -> None:
         self._apply_dynamic_layout()
-        self._populate_violations_tree()
-        self._sync_bulk_progress()
-        self._configure_editor_highlighting()
-        self._load_selected_bundle_into_editors()
         self._sync_action_buttons_state()
         self._sync_loading_overlays()
         self._pulse_timer = self.set_interval(0.24, self._tick_pulse)
+        # Defer heavy work so the modal shell renders immediately.
+        self.call_later(self._deferred_on_mount)
+
+    async def _deferred_on_mount(self) -> None:
+        """Run expensive mount-time setup off the initial layout path."""
+        tree_data = await asyncio.to_thread(self._compute_tree_data)
+        self._apply_tree_data(tree_data)
+        self._sync_bulk_progress()
+        self._configure_editor_highlighting()
+        await self._load_selected_bundle_into_editors()
+        self._sync_action_buttons_state()
+        self._sync_loading_overlays()
         with contextlib.suppress(Exception):
             self.query_one("#ai-full-fix-bulk-violations-tree", CustomTree).focus()
 
@@ -819,33 +833,59 @@ class AIFullFixBulkModal(ModalScreen[AIFullFixBulkModalResult | None]):
     def action_cancel(self) -> None:
         self.dismiss(None)
 
-    def _populate_violations_tree(self) -> None:
+    def _compute_tree_data(
+        self,
+    ) -> tuple[str, list[tuple[str, str, str, bool, list[str]]]]:
+        """Pre-compute all tree labels and data without touching widgets.
+
+        Returns ``(root_label, nodes)`` where each node is
+        ``(chart_key, label, color, is_selected, violations)``.
+        This method is safe to call from a background thread.
+        """
+        total_violations = sum(len(b.violations) for b in self._bundles.values())
+        viol_word = "violation" if total_violations == 1 else "violations"
+        root_label = f"Charts ({total_violations} {viol_word})"
+
+        nodes: list[tuple[str, str, str, bool, list[str]]] = []
+        for chart_key in self._order:
+            bundle = self._bundles[chart_key]
+            count = len(bundle.violations)
+            viol_word = "violation" if count == 1 else "violations"
+            marker = self._chart_marker(bundle)
+            elapsed_suffix = self._tree_elapsed_label(bundle)
+            label = (
+                f"{marker} {bundle.chart_name} ({count} {viol_word})"
+                f"{elapsed_suffix}"
+            )
+            color = self._chart_row_color(bundle)
+            is_selected = chart_key == self._selected_chart_key
+            nodes.append((chart_key, label, color, is_selected, list(bundle.violations)))
+        return root_label, nodes
+
+    def _apply_tree_data(
+        self,
+        tree_data: tuple[str, list[tuple[str, str, str, bool, list[str]]]],
+    ) -> None:
+        """Apply pre-computed tree data to the widget (must run on main thread)."""
+        root_label, nodes = tree_data
         with contextlib.suppress(Exception):
             tree = self.query_one("#ai-full-fix-bulk-violations-tree", CustomTree)
-            total_violations = sum(len(bundle.violations) for bundle in self._bundles.values())
-            violation_label = "violation" if total_violations == 1 else "violations"
-            tree.reset(f"Charts ({total_violations} {violation_label})")
+            tree.reset(root_label)
             tree.root.expand()
-            for chart_key in self._order:
-                bundle = self._bundles[chart_key]
-                violation_count = len(bundle.violations)
-                violation_label = "violation" if violation_count == 1 else "violations"
-                marker = self._chart_marker(bundle)
-                elapsed_suffix = self._tree_elapsed_label(bundle)
-                label = (
-                    f"{marker} {bundle.chart_name} ({violation_count} {violation_label})"
-                    f"{elapsed_suffix}"
-                )
-                chart_node = tree.root.add(
-                    Text(label, style=self._chart_row_color(bundle))
-                )
+            for chart_key, label, color, is_selected, violations in nodes:
+                chart_node = tree.root.add(Text(label, style=color))
                 chart_node.data = {"chart_key": chart_key}
-                if chart_key == self._selected_chart_key:
+                if is_selected:
                     chart_node.expand()
-                for violation in bundle.violations:
+                for violation in violations:
                     leaf = chart_node.add_leaf(violation)
                     leaf.data = {"chart_key": chart_key}
         self._sync_bulk_progress()
+
+    def _populate_violations_tree(self) -> None:
+        """Synchronous tree rebuild (used in on_mount and direct calls)."""
+        tree_data = self._compute_tree_data()
+        self._apply_tree_data(tree_data)
 
     def _bulk_progress_counts(self) -> tuple[int, int]:
         total = len(self._bundles)
@@ -934,7 +974,7 @@ class AIFullFixBulkModal(ModalScreen[AIFullFixBulkModalResult | None]):
         combined = "\n\n".join(sections).strip()
         return f"{combined}\n"
 
-    def _load_selected_bundle_into_editors(self) -> None:
+    async def _load_selected_bundle_into_editors(self) -> None:
         if not self._selected_chart_key:
             return
         bundle = self._bundles[self._selected_chart_key]
@@ -951,7 +991,7 @@ class AIFullFixBulkModal(ModalScreen[AIFullFixBulkModalResult | None]):
                 language="yaml",
                 theme=self._active_preview_theme(),
             )
-        self._render_template_file_sections(self._resolve_template_preview_text(bundle))
+        await self._render_template_file_sections(self._resolve_template_preview_text(bundle))
         self._sync_action_buttons_state()
         self._sync_loading_overlays()
 
@@ -1033,12 +1073,11 @@ class AIFullFixBulkModal(ModalScreen[AIFullFixBulkModalResult | None]):
         bundle.can_apply = bool(can_apply) or self._status_allows_verified_subset_apply(status_text)
         bundle.is_processing = self._is_processing_status(status_text) and not bool(bundle.can_apply)
         self._sync_bundle_elapsed_tracking(bundle, was_processing=was_processing)
-        self._populate_violations_tree()
-        if chart_key == self._selected_chart_key:
-            self._load_selected_bundle_into_editors()
-        else:
-            self._sync_action_buttons_state()
-            self._sync_loading_overlays()
+        # Defer heavy UI updates so the caller (streaming LLM) is not blocked.
+        load_editors = chart_key == self._selected_chart_key
+        self.call_later(
+            self._deferred_ui_update, load_editors=load_editors
+        )
 
     def set_bundle_status(
         self,
@@ -1061,11 +1100,30 @@ class AIFullFixBulkModal(ModalScreen[AIFullFixBulkModalResult | None]):
         if bundle.can_apply:
             bundle.is_processing = False
         self._sync_bundle_elapsed_tracking(bundle, was_processing=was_processing)
-        self._populate_violations_tree()
-        if chart_key == self._selected_chart_key:
-            self._load_selected_bundle_into_editors()
-        self._sync_action_buttons_state()
-        self._sync_loading_overlays()
+        # Defer heavy UI updates so the caller (streaming LLM) is not blocked.
+        load_editors = chart_key == self._selected_chart_key
+        self.call_later(
+            self._deferred_ui_update, load_editors=load_editors, sync_buttons=True
+        )
+
+    async def _deferred_ui_update(
+        self,
+        *,
+        load_editors: bool = False,
+        sync_buttons: bool = False,
+    ) -> None:
+        """Deferred UI refresh: offloads tree computation to a thread, then applies on main thread."""
+        self._ui_update_seq += 1
+        seq = self._ui_update_seq
+        tree_data = await asyncio.to_thread(self._compute_tree_data)
+        if seq != self._ui_update_seq:
+            return  # a newer update superseded this one
+        self._apply_tree_data(tree_data)
+        if load_editors:
+            await self._load_selected_bundle_into_editors()
+        if sync_buttons or not load_editors:
+            self._sync_action_buttons_state()
+            self._sync_loading_overlays()
 
     def begin_loading(self, *, message: str | None = None) -> None:
         """Show per-editor loading overlays while async generation is running."""
@@ -1116,7 +1174,7 @@ class AIFullFixBulkModal(ModalScreen[AIFullFixBulkModalResult | None]):
                 return
             self.dismiss(payload)
 
-    def on_custom_tree_node_selected(self, event: CustomTree.NodeSelected) -> None:
+    async def on_custom_tree_node_selected(self, event: CustomTree.NodeSelected) -> None:
         if event.tree.id != "ai-full-fix-bulk-violations-tree":
             return
         data = getattr(event.node, "data", None)
@@ -1127,7 +1185,7 @@ class AIFullFixBulkModal(ModalScreen[AIFullFixBulkModalResult | None]):
             return
         self._collect_current_editor_into_state()
         self._selected_chart_key = chart_key
-        self._load_selected_bundle_into_editors()
+        await self._load_selected_bundle_into_editors()
 
     def _apply_dynamic_layout(self) -> None:
         available_width = max(
@@ -1263,8 +1321,10 @@ class AIFullFixBulkModal(ModalScreen[AIFullFixBulkModalResult | None]):
                     theme=editor_theme,
                 )
 
-    def _render_template_file_sections(self, template_preview_text: str) -> None:
-        sections = self._parse_template_preview_sections(template_preview_text)
+    async def _render_template_file_sections(self, template_preview_text: str) -> None:
+        sections = await asyncio.to_thread(
+            self._parse_template_preview_sections, template_preview_text
+        )
         with contextlib.suppress(Exception):
             container = self.query_one("#ai-full-fix-bulk-template-files-list", CustomVertical)
             container.remove_children()

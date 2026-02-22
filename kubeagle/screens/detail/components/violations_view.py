@@ -3796,9 +3796,11 @@ class ViolationsView(CustomVertical):
             pass
         self._set_loading_overlay(True, "Loading violations...")
         self.set_recommendations_loading(True)
-        # Hide impact analysis view initially
+        # Hide impact analysis view initially and set loading state
         with contextlib.suppress(Exception):
-            self.query_one("#impact-analysis-view", ResourceImpactView).display = False
+            impact_view = self.query_one("#impact-analysis-view", ResourceImpactView)
+            impact_view.display = False
+            impact_view.set_loading(True, "Waiting for optimizer data...")
         # First-pass UX: fix preview is shown via modal instead of inline side panel.
         with contextlib.suppress(Exception):
             self.query_one("#preview-panel", CustomVertical).display = False
@@ -3868,25 +3870,43 @@ class ViolationsView(CustomVertical):
 
         self.violations = violations
         self.charts = charts
-        self._build_chart_indexes(charts)
 
-        self._violation_meta = self._build_violation_meta(violations)
+        # Bump sequence so stale async updates are discarded
+        self._data_update_seq = getattr(self, "_data_update_seq", 0) + 1
+        seq = self._data_update_seq
 
-        if not charts:
-            self._show_no_charts_state()
-            return
+        async def _do_update() -> None:
+            if getattr(self, "_data_update_seq", 0) != seq:
+                return
+            # Heavy CPU work — run off the main thread
+            indexes_and_meta = await asyncio.to_thread(
+                self._build_indexes_and_meta, charts, violations,
+            )
+            if getattr(self, "_data_update_seq", 0) != seq:
+                return
+            self._chart_team_map = indexes_and_meta["team_map"]
+            self._chart_path_map = indexes_and_meta["path_map"]
+            self._chart_by_path = indexes_and_meta["by_path"]
+            self._chart_by_name = indexes_and_meta["by_name"]
+            self._violation_meta = indexes_and_meta["meta"]
 
-        self._update_filter_dropdowns()
+            if not charts:
+                self._show_no_charts_state()
+                return
 
-        if not violations:
-            self._show_no_violations_state()
-        else:
-            self.populate_violations_table()
+            self._update_filter_dropdowns()
 
-        self._update_filter_status()
-        self._sync_recommendations_filters()
-        self._compute_resource_impact()
-        self._schedule_resize_update()
+            if not violations:
+                self._show_no_violations_state()
+            else:
+                self.populate_violations_table()
+
+            self._update_filter_status()
+            self._sync_recommendations_filters()
+            self._compute_resource_impact()
+            self._schedule_resize_update()
+
+        self.call_later(_do_update)
 
     def update_partial_data(
         self,
@@ -3898,20 +3918,38 @@ class ViolationsView(CustomVertical):
         """Incrementally refresh violations table while analysis is still running."""
         self.violations = violations
         self.charts = charts
-        self._build_chart_indexes(charts)
 
-        self._violation_meta = self._build_violation_meta(violations)
+        # Bump sequence so stale async updates are discarded
+        self._partial_update_seq = getattr(self, "_partial_update_seq", 0) + 1
+        seq = self._partial_update_seq
 
-        if charts:
-            self._update_filter_dropdowns()
-            if violations:
-                self.populate_violations_table()
-            else:
-                self._show_no_violations_state()
-            self._update_filter_status()
-            self._sync_recommendations_filters()
-            if progress_message:
-                self.update_loading_message(progress_message)
+        async def _do_partial() -> None:
+            if getattr(self, "_partial_update_seq", 0) != seq:
+                return
+            # Heavy CPU work — run off the main thread
+            indexes_and_meta = await asyncio.to_thread(
+                self._build_indexes_and_meta, charts, violations,
+            )
+            if getattr(self, "_partial_update_seq", 0) != seq:
+                return
+            self._chart_team_map = indexes_and_meta["team_map"]
+            self._chart_path_map = indexes_and_meta["path_map"]
+            self._chart_by_path = indexes_and_meta["by_path"]
+            self._chart_by_name = indexes_and_meta["by_name"]
+            self._violation_meta = indexes_and_meta["meta"]
+
+            if charts:
+                self._update_filter_dropdowns()
+                if violations:
+                    self.populate_violations_table()
+                else:
+                    self._show_no_violations_state()
+                self._update_filter_status()
+                self._sync_recommendations_filters()
+                if progress_message:
+                    self.update_loading_message(progress_message)
+
+        self.call_later(_do_partial)
 
     def _schedule_resize_update(self) -> None:
         """Debounce expensive resize-driven relayout/refresh to avoid flicker."""
@@ -4038,7 +4076,7 @@ class ViolationsView(CustomVertical):
     # ------------------------------------------------------------------
 
     def _compute_resource_impact(self) -> None:
-        """Compute and display resource impact analysis."""
+        """Compute and display resource impact analysis in a background thread."""
         with contextlib.suppress(Exception):
             from kubeagle.optimizer.resource_impact_calculator import (
                 ResourceImpactCalculator,
@@ -4046,29 +4084,38 @@ class ViolationsView(CustomVertical):
 
             calculator = ResourceImpactCalculator()
             controller = self._get_optimizer_controller()
+            # Snapshot data for the thread — avoid mutating shared state
+            charts = list(self.charts)
+            violations = list(self.violations)
 
-            # Fetch cluster nodes from app state when available
-            cluster_nodes = None
-            with contextlib.suppress(Exception):
-                state = getattr(self.app, "state", None)
-                if state is not None:
-                    nodes = getattr(state, "nodes", None)
-                    if nodes:
-                        cluster_nodes = nodes
+            def _do_compute() -> None:
+                result = calculator.compute_impact(
+                    charts,
+                    violations,
+                    optimizer_controller=controller,
+                )
+                # Schedule UI update back on the main thread
+                self.app.call_from_thread(
+                    self._apply_resource_impact, result, charts, violations, controller,
+                )
 
-            result = calculator.compute_impact(
-                self.charts,
-                self.violations,
-                optimizer_controller=controller,
-                cluster_nodes=cluster_nodes,
-            )
+            self.run_worker(_do_compute, thread=True, name="impact-compute", exclusive=True)
+
+    def _apply_resource_impact(
+        self,
+        result: object,
+        charts: list[object],
+        violations: list[object],
+        controller: object,
+    ) -> None:
+        """Apply computed resource impact result to the UI (main thread)."""
+        with contextlib.suppress(Exception):
             impact_view = self.query_one("#impact-analysis-view", ResourceImpactView)
             impact_view.set_source_data(
-                result,
-                charts=self.charts,
-                violations=self.violations,
+                result,  # type: ignore[arg-type]
+                charts=charts,  # type: ignore[arg-type]
+                violations=violations,  # type: ignore[arg-type]
                 optimizer_controller=controller,
-                cluster_nodes=cluster_nodes,
             )
 
     def show_impact_view(self) -> None:
@@ -4130,6 +4177,57 @@ class ViolationsView(CustomVertical):
         self._chart_path_map = path_map
         self._chart_by_path = by_path
         self._chart_by_name = by_name
+
+    def _build_indexes_and_meta(
+        self, charts: list, violations: list[ViolationResult],
+    ) -> dict[str, Any]:
+        """Build chart indexes + violation meta in one pass (thread-safe CPU work).
+
+        Returns a dict with keys: team_map, path_map, by_path, by_name, meta.
+        """
+        # --- chart indexes ---
+        team_map: dict[str, str] = {}
+        path_map: dict[str, str] = {}
+        by_path: dict[str, object] = {}
+        by_name: dict[str, object] = {}
+        for chart in charts:
+            chart_name = getattr(chart, "name", None)
+            chart_team = getattr(chart, "team", None)
+            chart_path = getattr(chart, "values_file", None)
+            if not chart_name:
+                continue
+            if chart_team:
+                team_map[chart_name] = chart_team
+            if chart_path:
+                by_path.setdefault(chart_path, chart)
+                existing = path_map.get(chart_name)
+                if existing is None:
+                    path_map[chart_name] = chart_path
+                elif existing != chart_path:
+                    path_map[chart_name] = ""
+            by_name.setdefault(chart_name, chart)
+
+        # --- violation meta ---
+        fmt_path = self._format_chart_path_display
+        vft_from_path = self._values_file_type_from_path
+        meta: dict[int, _ViolationMeta] = {}
+        for v in violations:
+            team = v.team or team_map.get(v.chart_name, "Unknown")
+            cp = v.chart_path or path_map.get(v.chart_name, "")
+            ck = cp if cp else v.chart_name
+            vft = vft_from_path(cp)
+            st = f"{v.chart_name}\0{v.rule_name}\0{cp}\0{vft}\0{v.description}\0{v.category}\0{team}".lower()
+            fp = fmt_path(cp) if cp else "-"
+            sr = _SEV_ORDER.get(v.severity, 99)
+            meta[id(v)] = _ViolationMeta(team, cp, ck, vft, st, fp, sr)
+
+        return {
+            "team_map": team_map,
+            "path_map": path_map,
+            "by_path": by_path,
+            "by_name": by_name,
+            "meta": meta,
+        }
 
     # ------------------------------------------------------------------
     # Filtering
@@ -4741,6 +4839,15 @@ class ViolationsView(CustomVertical):
             label = f"Filters ({active_filters})"
         with contextlib.suppress(Exception):
             self.query_one("#filters-btn", CustomButton).label = label
+
+    def _handle_filters_btn(self) -> None:
+        """Route filter button to the correct modal based on active view."""
+        with contextlib.suppress(Exception):
+            impact_view = self.query_one("#impact-analysis-view", ResourceImpactView)
+            if impact_view.display:
+                impact_view.open_filters_modal()
+                return
+        self._open_filters_modal()
 
     def _open_filters_modal(self) -> None:
         filter_options = {
@@ -7144,7 +7251,7 @@ class ViolationsView(CustomVertical):
         elif btn == "advanced-filters-btn":
             self._toggle_advanced_filters()
         elif btn == "filters-btn":
-            self._open_filters_modal()
+            self._handle_filters_btn()
 
     def _select_violation_at(self, event: object) -> None:
         """Select the violation at the row indicated by *event* and update buttons."""

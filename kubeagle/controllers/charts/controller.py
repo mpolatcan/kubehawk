@@ -283,7 +283,7 @@ class ChartsController(BaseController):
             except (OSError, ValueError):
                 return []
 
-            chart_dirs = self._chart_fetcher.find_chart_directories()
+            chart_dirs = await asyncio.to_thread(self._chart_fetcher.find_chart_directories)
 
             if active_releases is not None:
                 chart_dirs = [

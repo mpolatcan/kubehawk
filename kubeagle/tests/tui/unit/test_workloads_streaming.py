@@ -523,14 +523,21 @@ def test_input_submitted_triggers_immediate_search_refresh(
 
 
 @pytest.mark.unit
-def test_refresh_table_formats_rows_from_pre_filtered_workloads(
+def test_apply_table_applies_precomputed_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Tab table refresh should reuse one filtered workload list for row rendering."""
+    """_apply_table should populate the table widget with pre-computed rows."""
     screen = WorkloadsScreen()
-    filtered_workloads = [SimpleNamespace(name="api")]
-    filtered_calls: list[bool] = []
-    formatted_calls: list[list[SimpleNamespace]] = []
+    filtered_workloads = [SimpleNamespace(name="api", namespace="ns", kind="Deployment")]
+    rows = [("api",)]
+    columns: list[tuple[str, int]] = [("Name", 20)]
+    content_sig = (
+        len(filtered_workloads),
+        (("ns", "Deployment", "api"),),
+        ("Name",),
+        "name",
+        False,
+    )
 
     class _FakeDataTable:
         fixed_columns = 0
@@ -567,36 +574,15 @@ def test_refresh_table_formats_rows_from_pre_filtered_workloads(
             self.rows = rows
 
     fake_table = _FakeTable()
-    monkeypatch.setattr(
-        screen._presenter,
-        "get_filtered_workloads",
-        lambda **_kwargs: filtered_calls.append(True) or filtered_workloads,
-    )
-    monkeypatch.setattr(
-        screen._presenter,
-        "format_workload_rows",
-        lambda workloads, *, columns: (
-            formatted_calls.append(list(workloads)) or [("api",)]
-        ),
-    )
-    monkeypatch.setattr(
-        screen._presenter,
-        "get_resource_rows",
-        lambda **_kwargs: (_ for _ in ()).throw(
-            AssertionError("get_resource_rows should not be called")
-        ),
-    )
     monkeypatch.setattr(screen, "query_one", lambda _selector, _widget_type: fake_table)
 
-    screen._refresh_table(TAB_WORKLOADS_ALL)
+    screen._apply_table(TAB_WORKLOADS_ALL, filtered_workloads, rows, columns, content_sig)
 
-    assert filtered_calls == [True]
-    assert formatted_calls == [filtered_workloads]
     assert fake_table.rows == [("api",)]
 
 
 @pytest.mark.unit
-def test_refresh_table_preserves_selected_workload_row_across_stream_repaint(
+def test_apply_table_preserves_selected_workload_row_across_stream_repaint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Selection should remain on the same workload identity after table rebuild."""
@@ -614,6 +600,17 @@ def test_refresh_table_preserves_selected_workload_row_across_stream_repaint(
         SimpleNamespace(namespace="team-a", kind="Deployment", name="worker"),
         SimpleNamespace(namespace="team-a", kind="Deployment", name="api"),
     ]
+    rows = [(str(w.name),) for w in reordered_workloads]
+    columns: list[tuple[str, int]] = [("Name", 20)]
+    content_sig = (
+        len(reordered_workloads),
+        tuple(
+            (w.namespace, w.kind, w.name) for w in reordered_workloads
+        ),
+        ("Name",),
+        "name",
+        False,
+    )
 
     class _FakeDataTable:
         fixed_columns = 0
@@ -650,19 +647,11 @@ def test_refresh_table_preserves_selected_workload_row_across_stream_repaint(
             self.rows = rows
 
     fake_table = _FakeTable()
-    monkeypatch.setattr(
-        screen._presenter,
-        "get_filtered_workloads",
-        lambda **_kwargs: reordered_workloads,
-    )
-    monkeypatch.setattr(
-        screen._presenter,
-        "format_workload_rows",
-        lambda workloads, *, columns: [(str(workload.name),) for workload in workloads],
-    )
     monkeypatch.setattr(screen, "query_one", lambda _selector, _widget_type: fake_table)
 
-    screen._refresh_table(TAB_WORKLOADS_ALL)
+    screen._apply_table(
+        TAB_WORKLOADS_ALL, reordered_workloads, rows, columns, content_sig,
+    )
 
     assert fake_table.cursor_row == 1
     assert screen._row_workload_map_by_table["workloads-all-table"][1].name == "api"
@@ -672,11 +661,19 @@ def test_refresh_table_preserves_selected_workload_row_across_stream_repaint(
 def test_refresh_active_tab_reuses_filtered_workloads_for_summary_and_table(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Active-tab refresh should reuse one filtered workload list across summary+table."""
+    """Active-tab refresh heavy computation should call get_filtered_workloads
+    once and reuse the result for both summary and table formatting.
+
+    Since _refresh_active_tab now offloads to a thread via call_later, we
+    verify the contract by intercepting _apply_summary and _apply_table
+    which receive the pre-computed results on the main thread.
+    """
+    import asyncio as _asyncio
+
     screen = WorkloadsScreen()
-    filtered_workloads = [SimpleNamespace(name="api")]
+    filtered_workloads = [SimpleNamespace(name="api", namespace="ns", kind="Deployment")]
     presenter_calls: list[str] = []
-    summary_payloads: list[tuple[list[Any], int]] = []
+    summary_payloads: list[dict[str, Any]] = []
     table_payloads: list[tuple[str, list[Any]]] = []
 
     monkeypatch.setattr(screen, "_active_view_filter", lambda: "all")
@@ -692,24 +689,45 @@ def test_refresh_active_tab_reuses_filtered_workloads_for_summary_and_table(
         lambda **_kwargs: presenter_calls.append("scoped") or 12,
     )
     monkeypatch.setattr(
+        screen._presenter,
+        "build_resource_summary_from_filtered",
+        lambda **_kwargs: {"shown_total": "1/1"},
+    )
+    monkeypatch.setattr(
+        screen._presenter,
+        "format_workload_rows",
+        lambda workloads, *, columns: [("api",)],
+    )
+
+    # Capture what _apply_summary and _apply_table receive.
+    monkeypatch.setattr(
         screen,
-        "_refresh_summary",
-        lambda *, filtered_workloads=None, scoped_total=None: summary_payloads.append(
-            (list(filtered_workloads or []), int(scoped_total or 0))
-        ),
+        "_apply_summary",
+        lambda summary: summary_payloads.append(summary),
     )
     monkeypatch.setattr(
         screen,
-        "_refresh_table",
-        lambda tab_id, *, filtered_workloads=None: table_payloads.append(
-            (tab_id, list(filtered_workloads or []))
+        "_apply_table",
+        lambda tab_id, filtered, rows, cols, sig: table_payloads.append(
+            (tab_id, list(filtered))
         ),
+    )
+
+    # Capture the coroutine scheduled via call_later and run it directly.
+    scheduled_coros: list[Any] = []
+    monkeypatch.setattr(
+        screen,
+        "call_later",
+        lambda coro: scheduled_coros.append(coro),
     )
 
     screen._refresh_active_tab()
 
+    assert len(scheduled_coros) == 1
+    _asyncio.run(scheduled_coros[0]())
+
     # When there is no search query, get_scoped_workload_count is skipped
     # (len(filtered_workloads) is used instead) to avoid a redundant filter pass.
     assert presenter_calls == ["filtered"]
-    assert summary_payloads == [(filtered_workloads, len(filtered_workloads))]
+    assert summary_payloads == [{"shown_total": "1/1"}]
     assert table_payloads == [(TAB_WORKLOADS_ALL, filtered_workloads)]

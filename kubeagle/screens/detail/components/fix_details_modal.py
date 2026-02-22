@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import re
 
@@ -121,9 +122,9 @@ class FixDetailsModal(ModalScreen[str | None]):
                     CustomButton,
                 ).focus()
         if self._diff_text is not None:
-            self._render_diff_content()
+            self.call_later(self._render_diff_content_async)
         elif self._log_text is not None:
-            self._render_log_content()
+            self.call_later(self._render_log_content_async)
 
     def on_resize(self, _: Resize) -> None:
         self._apply_dynamic_layout()
@@ -192,6 +193,36 @@ class FixDetailsModal(ModalScreen[str | None]):
                 empty_fallback="# No output captured.",
             )
 
+    async def _render_diff_content_async(self) -> None:
+        with contextlib.suppress(Exception):
+            diff_log = self.query_one("#fix-details-modal-diff-log", CustomRichLog)
+            lines = await asyncio.to_thread(
+                _compute_diff_lines,
+                str(self._diff_text or ""),
+                "# No content changes",
+            )
+            log_widget = diff_log.rich_log
+            if log_widget is None:
+                return
+            log_widget.clear()
+            for line in lines:
+                log_widget.write(line, scroll_end=False)
+
+    async def _render_log_content_async(self) -> None:
+        with contextlib.suppress(Exception):
+            log = self.query_one("#fix-details-modal-log", CustomRichLog)
+            plain_lines = await asyncio.to_thread(
+                _compute_plain_lines,
+                str(self._log_text or ""),
+                "# No output captured.",
+            )
+            log_widget = log.rich_log
+            if log_widget is None:
+                return
+            log_widget.clear()
+            for line in plain_lines:
+                log_widget.write(line, scroll_end=False)
+
 
 def _style_diff_line(line: str) -> Text:
     """Colorize a unified diff line by prefix for stable git-style readability."""
@@ -204,6 +235,38 @@ def _style_diff_line(line: str) -> Text:
     if line.startswith("-"):
         return Text(line, style="red")
     return Text(line)
+
+
+def _compute_diff_lines(content: str, empty_fallback: str) -> list[Text]:
+    """Pre-compute styled diff lines (thread-safe, no widget access)."""
+    normalized = str(content or "").rstrip("\n")
+    if not normalized:
+        normalized = empty_fallback
+    lines: list[Text] = []
+    for line_number, line in enumerate(normalized.splitlines(), start=1):
+        rendered = Text(f"{line_number:>4} ", style="dim")
+        rendered.append_text(_style_diff_line(line))
+        lines.append(rendered)
+    return lines
+
+
+def _compute_plain_lines(content: str, empty_fallback: str) -> list[str]:
+    """Pre-compute plain text lines (thread-safe, no widget access)."""
+    normalized = str(content or "").rstrip("\n")
+    if not normalized:
+        normalized = empty_fallback
+    return normalized.splitlines()
+
+
+def _compute_diff_lines_batch(
+    sections: list[tuple[str, str]],
+    empty_fallback: str,
+) -> dict[str, list[Text]]:
+    """Pre-compute styled diff lines for multiple sections (thread-safe)."""
+    result: dict[str, list[Text]] = {}
+    for editor_id, content in sections:
+        result[editor_id] = _compute_diff_lines(content, empty_fallback)
+    return result
 
 
 def _write_diff_to_log(diff_log: CustomRichLog, content: str, *, empty_fallback: str) -> None:
@@ -302,10 +365,10 @@ class BundleDiffModal(ModalScreen[str | None]):
 
     def on_mount(self) -> None:
         self._apply_dynamic_layout()
-        self._render_values_diff_content()
-        self._render_template_diff_sections()
         with contextlib.suppress(Exception):
             self.query_one("#bundle-diff-modal-action-copy", CustomButton).focus()
+        self.call_later(self._render_values_diff_content_async)
+        self.call_later(self._render_template_diff_sections_async)
 
     def on_resize(self, _: Resize) -> None:
         self._apply_dynamic_layout()
@@ -348,6 +411,21 @@ class BundleDiffModal(ModalScreen[str | None]):
             values_log = self.query_one("#bundle-diff-values-editor", CustomRichLog)
             _write_diff_to_log(values_log, self._values_diff_text, empty_fallback="# No values diff available.")
 
+    async def _render_values_diff_content_async(self) -> None:
+        with contextlib.suppress(Exception):
+            values_log = self.query_one("#bundle-diff-values-editor", CustomRichLog)
+            lines = await asyncio.to_thread(
+                _compute_diff_lines,
+                self._values_diff_text,
+                "# No values diff available.",
+            )
+            log_widget = values_log.rich_log
+            if log_widget is None:
+                return
+            log_widget.clear()
+            for line in lines:
+                log_widget.write(line, scroll_end=False)
+
     def _render_template_diff_sections(self) -> None:
         sections = self._parse_template_diff_sections(self._template_diff_text)
         self._template_section_content_by_id = {}
@@ -384,11 +462,69 @@ class BundleDiffModal(ModalScreen[str | None]):
                 )
         self.call_after_refresh(self._render_template_diff_logs)
 
+    async def _render_template_diff_sections_async(self) -> None:
+        sections = await asyncio.to_thread(
+            self._parse_template_diff_sections,
+            self._template_diff_text,
+        )
+        self._template_section_content_by_id = {}
+        with contextlib.suppress(Exception):
+            container = self.query_one("#bundle-diff-template-files-list", CustomVertical)
+            container.remove_children()
+            if not sections:
+                container.mount(
+                    CustomStatic(
+                        "No template diff available.",
+                        id="bundle-diff-template-empty",
+                        markup=False,
+                    )
+                )
+                return
+
+            for index, (file_path, content) in enumerate(sections):
+                editor_id = f"{self._TEMPLATE_EDITOR_ID_PREFIX}{index}"
+                self._template_section_content_by_id[editor_id] = content
+                editor = CustomRichLog(
+                    id=editor_id,
+                    classes="bundle-diff-template-editor",
+                    highlight=False,
+                    markup=False,
+                    wrap=False,
+                )
+                container.mount(
+                    CustomCollapsible(
+                        editor,
+                        title=file_path,
+                        collapsed=index != 0,
+                        classes="bundle-diff-template-collapsible",
+                    )
+                )
+        self.call_after_refresh(self._render_template_diff_logs_async)
+
     def _render_template_diff_logs(self) -> None:
         for editor_id, content in self._template_section_content_by_id.items():
             with contextlib.suppress(Exception):
                 diff_log = self.query_one(f"#{editor_id}", CustomRichLog)
                 _write_diff_to_log(diff_log, content, empty_fallback="# No template diff available.")
+
+    async def _render_template_diff_logs_async(self) -> None:
+        all_lines: dict[str, list[Text]] = {}
+        section_items = list(self._template_section_content_by_id.items())
+        if section_items:
+            all_lines = await asyncio.to_thread(
+                _compute_diff_lines_batch,
+                section_items,
+                "# No template diff available.",
+            )
+        for editor_id, lines in all_lines.items():
+            with contextlib.suppress(Exception):
+                diff_log = self.query_one(f"#{editor_id}", CustomRichLog)
+                log_widget = diff_log.rich_log
+                if log_widget is None:
+                    continue
+                log_widget.clear()
+                for line in lines:
+                    log_widget.write(line, scroll_end=False)
 
     @classmethod
     def _parse_template_diff_sections(cls, template_diff_text: str) -> list[tuple[str, str]]:

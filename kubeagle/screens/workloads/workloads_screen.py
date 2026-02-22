@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
@@ -1581,7 +1582,36 @@ class WorkloadsScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scr
 
     def _configure_tables(self) -> None:
         for tab_id in WORKLOADS_TAB_IDS:
-            self._refresh_table(tab_id)
+            self._init_table_for_tab(tab_id)
+
+    def _init_table_for_tab(self, tab_id: str) -> None:
+        """Set up table columns for a tab (lightweight, no data processing)."""
+        table_id = WORKLOADS_TABLE_ID_BY_TAB[tab_id]
+        columns = self._columns_for_tab(tab_id)
+        column_names = tuple(name for name, _width in columns)
+        with suppress(NoMatches):
+            table = self.query_one(f"#{table_id}", CustomDataTable)
+            needs_reconfigure = (
+                table_id not in self._initialized_table_ids
+                or self._table_column_names_by_id.get(table_id) != column_names
+            )
+            if needs_reconfigure:
+                fixed_columns = 0
+                if tab_id == TAB_WORKLOADS_NODE_ANALYSIS and "Mem R/L" in column_names:
+                    fixed_columns = column_names.index("Mem R/L") + 1
+                with table.batch_update():
+                    if table.data_table is not None:
+                        table.data_table.fixed_columns = fixed_columns
+                    table.clear(columns=True)
+                    table.set_header_tooltips(self._tooltips_for_tab(tab_id))
+                    if tab_id == TAB_WORKLOADS_NODE_ANALYSIS:
+                        table.set_default_tooltip(
+                            "Double-click row to open assigned node and pod details"
+                        )
+                    for index, (name, _) in enumerate(columns):
+                        table.add_column(name, key=f"col-{index}")
+                    self._initialized_table_ids.add(table_id)
+                    self._table_column_names_by_id[table_id] = column_names
 
     def _schedule_partial_refresh(self) -> None:
         """Debounce frequent partial events to avoid repeated heavy table refreshes."""
@@ -1700,87 +1730,171 @@ class WorkloadsScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scr
         }
 
     def _refresh_filter_options(self) -> None:
+        self._refresh_filter_seq = getattr(self, "_refresh_filter_seq", 0) + 1
+        seq = self._refresh_filter_seq
         workloads = self._presenter.get_all_workloads()
-        # Single-pass extraction of all filter facets to avoid iterating
-        # the workload list 5+ times.
-        name_set: set[str] = set()
-        kind_set: set[str] = set()
-        namespace_set: set[str] = set()
-        status_set: set[str] = set()
-        with_helm_count = 0
-        for workload in workloads:
-            name = str(getattr(workload, "name", "")).strip()
-            if name:
-                name_set.add(name)
-            kind = str(getattr(workload, "kind", "")).strip()
-            if kind:
-                kind_set.add(kind)
-            namespace = str(getattr(workload, "namespace", "")).strip()
-            if namespace:
-                namespace_set.add(namespace)
-            status = str(getattr(workload, "status", "")).strip()
-            if status:
-                status_set.add(status)
-            helm_release = str(getattr(workload, "helm_release", "") or "").strip()
-            if helm_release:
-                with_helm_count += 1
-        without_helm_count = len(workloads) - with_helm_count
-        names = sorted(name_set)
-        kinds = sorted(kind_set)
-        namespaces = sorted(namespace_set)
-        statuses = sorted(status_set)
+        # Capture current selected values and pdb options for the thread.
+        prev_name_values = set(self._name_filter_values)
+        prev_kind_values = set(self._kind_filter_values)
+        prev_helm_release_values = set(self._helm_release_filter_values)
+        prev_namespace_values = set(self._namespace_filter_values)
+        prev_status_values = set(self._status_filter_values)
+        prev_pdb_values = set(self._pdb_filter_values)
+        pdb_filter_options = self._pdb_filter_options
 
-        self._name_filter_options = tuple((value, value) for value in names)
-        self._kind_filter_options = tuple((value, value) for value in kinds)
-        self._helm_release_filter_options = tuple(
-            option
-            for option in (
-                (
-                    f"With Helm ({with_helm_count})",
-                    "with_helm",
+        async def _do_refresh() -> None:
+            if getattr(self, "_refresh_filter_seq", 0) != seq:
+                return
+
+            def _heavy() -> tuple[
+                tuple[tuple[str, str], ...],
+                tuple[tuple[str, str], ...],
+                tuple[tuple[str, str], ...],
+                tuple[tuple[str, str], ...],
+                tuple[tuple[str, str], ...],
+                set[str],
+                set[str],
+                set[str],
+                set[str],
+                set[str],
+                set[str],
+            ]:
+                # Single-pass extraction of all filter facets to avoid iterating
+                # the workload list 5+ times.
+                name_set: set[str] = set()
+                kind_set: set[str] = set()
+                namespace_set: set[str] = set()
+                status_set: set[str] = set()
+                with_helm_count = 0
+                for workload in workloads:
+                    name = str(getattr(workload, "name", "")).strip()
+                    if name:
+                        name_set.add(name)
+                    kind = str(getattr(workload, "kind", "")).strip()
+                    if kind:
+                        kind_set.add(kind)
+                    namespace = str(getattr(workload, "namespace", "")).strip()
+                    if namespace:
+                        namespace_set.add(namespace)
+                    status = str(getattr(workload, "status", "")).strip()
+                    if status:
+                        status_set.add(status)
+                    helm_release = str(getattr(workload, "helm_release", "") or "").strip()
+                    if helm_release:
+                        with_helm_count += 1
+                without_helm_count = len(workloads) - with_helm_count
+                names = sorted(name_set)
+                kinds = sorted(kind_set)
+                namespaces = sorted(namespace_set)
+                statuses = sorted(status_set)
+
+                name_opts: tuple[tuple[str, str], ...] = tuple(
+                    (value, value) for value in names
                 )
-                if with_helm_count > 0
-                else None,
-                (
-                    f"Without Helm ({without_helm_count})",
-                    "without_helm",
+                kind_opts: tuple[tuple[str, str], ...] = tuple(
+                    (value, value) for value in kinds
                 )
-                if without_helm_count > 0
-                else None,
-            )
-            if option is not None
-        )
-        self._namespace_filter_options = tuple((value, value) for value in namespaces)
-        self._status_filter_options = tuple((value, value) for value in statuses)
+                helm_release_opts: tuple[tuple[str, str], ...] = tuple(
+                    option
+                    for option in (
+                        (
+                            f"With Helm ({with_helm_count})",
+                            "with_helm",
+                        )
+                        if with_helm_count > 0
+                        else None,
+                        (
+                            f"Without Helm ({without_helm_count})",
+                            "without_helm",
+                        )
+                        if without_helm_count > 0
+                        else None,
+                    )
+                    if option is not None
+                )
+                namespace_opts: tuple[tuple[str, str], ...] = tuple(
+                    (value, value) for value in namespaces
+                )
+                status_opts: tuple[tuple[str, str], ...] = tuple(
+                    (value, value) for value in statuses
+                )
 
-        name_values = {value for _, value in self._name_filter_options}
-        kind_values = {value for _, value in self._kind_filter_options}
-        helm_release_values = {value for _, value in self._helm_release_filter_options}
-        namespace_values = {value for _, value in self._namespace_filter_options}
-        status_values = {value for _, value in self._status_filter_options}
-        pdb_values = {value for _, value in self._pdb_filter_options}
+                name_vals = {value for _, value in name_opts}
+                kind_vals = {value for _, value in kind_opts}
+                helm_release_vals = {value for _, value in helm_release_opts}
+                namespace_vals = {value for _, value in namespace_opts}
+                status_vals = {value for _, value in status_opts}
+                pdb_vals = {value for _, value in pdb_filter_options}
 
-        self._name_filter_values = {
-            value for value in self._name_filter_values if value in name_values
-        }
-        self._kind_filter_values = {
-            value for value in self._kind_filter_values if value in kind_values
-        }
-        self._helm_release_filter_values = {
-            value
-            for value in self._helm_release_filter_values
-            if value in helm_release_values
-        }
-        self._namespace_filter_values = {
-            value for value in self._namespace_filter_values if value in namespace_values
-        }
-        self._status_filter_values = {
-            value for value in self._status_filter_values if value in status_values
-        }
-        self._pdb_filter_values = {
-            value for value in self._pdb_filter_values if value in pdb_values
-        }
-        self._update_filter_button_label()
+                new_name_filter = {
+                    value for value in prev_name_values if value in name_vals
+                }
+                new_kind_filter = {
+                    value for value in prev_kind_values if value in kind_vals
+                }
+                new_helm_release_filter = {
+                    value
+                    for value in prev_helm_release_values
+                    if value in helm_release_vals
+                }
+                new_namespace_filter = {
+                    value for value in prev_namespace_values if value in namespace_vals
+                }
+                new_status_filter = {
+                    value for value in prev_status_values if value in status_vals
+                }
+                new_pdb_filter = {
+                    value for value in prev_pdb_values if value in pdb_vals
+                }
+
+                return (
+                    name_opts,
+                    kind_opts,
+                    helm_release_opts,
+                    namespace_opts,
+                    status_opts,
+                    new_name_filter,
+                    new_kind_filter,
+                    new_helm_release_filter,
+                    new_namespace_filter,
+                    new_status_filter,
+                    new_pdb_filter,
+                )
+
+            result = await asyncio.to_thread(_heavy)
+
+            if getattr(self, "_refresh_filter_seq", 0) != seq:
+                return
+
+            (
+                name_opts,
+                kind_opts,
+                helm_release_opts,
+                namespace_opts,
+                status_opts,
+                new_name_filter,
+                new_kind_filter,
+                new_helm_release_filter,
+                new_namespace_filter,
+                new_status_filter,
+                new_pdb_filter,
+            ) = result
+
+            # Apply results on the main thread.
+            self._name_filter_options = name_opts
+            self._kind_filter_options = kind_opts
+            self._helm_release_filter_options = helm_release_opts
+            self._namespace_filter_options = namespace_opts
+            self._status_filter_options = status_opts
+            self._name_filter_values = new_name_filter
+            self._kind_filter_values = new_kind_filter
+            self._helm_release_filter_values = new_helm_release_filter
+            self._namespace_filter_values = new_namespace_filter
+            self._status_filter_values = new_status_filter
+            self._pdb_filter_values = new_pdb_filter
+            self._update_filter_button_label()
+
+        self.call_later(_do_refresh)
 
     def _active_filter_count(self) -> int:
         count = 0
@@ -1884,42 +1998,85 @@ class WorkloadsScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scr
         self._refresh_active_tab()
 
     def _refresh_active_tab(self) -> None:
+        self._refresh_active_tab_seq = getattr(self, "_refresh_active_tab_seq", 0) + 1
+        seq = self._refresh_active_tab_seq
+
+        # Snapshot all inputs on the main thread so the worker sees a
+        # consistent view even if the user changes filters/search/sort
+        # while the background computation is in progress.
         filter_kwargs = self._current_filter_kwargs()
         active_view_filter = self._active_view_filter()
-        # When there is no search query, the filtered list IS the scoped total,
-        # so we can skip the separate get_scoped_workload_count call that would
-        # re-run _filter_workloads a second time.
         has_search = bool(self._search_query)
-        filtered_workloads = self._presenter.get_filtered_workloads(
-            workload_view_filter=active_view_filter,
-            search_query=self._search_query,
-            sort_by=self._sort_by,
-            descending=self._sort_desc,
-            **filter_kwargs,
-        )
-        if has_search:
-            scoped_total = self._presenter.get_scoped_workload_count(
-                workload_view_filter=active_view_filter,
-                **filter_kwargs,
-            )
-        else:
-            scoped_total = len(filtered_workloads)
-        self._refresh_summary(
-            filtered_workloads=filtered_workloads,
-            scoped_total=scoped_total,
-        )
-        self._refresh_table(self._active_tab_id, filtered_workloads=filtered_workloads)
+        search_query = self._search_query
+        sort_by = self._sort_by
+        sort_desc = self._sort_desc
+        active_tab_id = self._active_tab_id
+        presenter = self._presenter
+        columns = self._columns_for_tab(active_tab_id)
 
-    def _refresh_summary(
-        self,
-        *,
-        filtered_workloads: list[Any],
-        scoped_total: int,
-    ) -> None:
-        summary = self._presenter.build_resource_summary_from_filtered(
-            filtered_workloads=filtered_workloads,
-            scoped_total=scoped_total,
-        )
+        async def _do_refresh() -> None:
+            if getattr(self, "_refresh_active_tab_seq", 0) != seq:
+                return
+
+            def _heavy() -> tuple[
+                list[Any],
+                int,
+                dict[str, Any],
+                list[Any],
+                list[tuple[str, int]],
+                tuple[Any, ...],
+            ]:
+                filtered = presenter.get_filtered_workloads(
+                    workload_view_filter=active_view_filter,
+                    search_query=search_query,
+                    sort_by=sort_by,
+                    descending=sort_desc,
+                    **filter_kwargs,
+                )
+                if has_search:
+                    scoped = presenter.get_scoped_workload_count(
+                        workload_view_filter=active_view_filter,
+                        **filter_kwargs,
+                    )
+                else:
+                    scoped = len(filtered)
+                summary = presenter.build_resource_summary_from_filtered(
+                    filtered_workloads=filtered,
+                    scoped_total=scoped,
+                )
+                rows = presenter.format_workload_rows(filtered, columns=columns)
+                column_names = tuple(name for name, _width in columns)
+                content_sig = (
+                    len(filtered),
+                    tuple(
+                        (
+                            str(getattr(w, "namespace", "") or ""),
+                            str(getattr(w, "kind", "") or ""),
+                            str(getattr(w, "name", "") or ""),
+                        )
+                        for w in filtered
+                    ),
+                    column_names,
+                    sort_by,
+                    sort_desc,
+                )
+                return filtered, scoped, summary, rows, columns, content_sig
+
+            result = await asyncio.to_thread(_heavy)
+
+            if getattr(self, "_refresh_active_tab_seq", 0) != seq:
+                return
+
+            filtered, scoped, summary, rows, cols, content_sig = result
+
+            # Apply UI updates on main thread.
+            self._apply_summary(summary)
+            self._apply_table(active_tab_id, filtered, rows, cols, content_sig)
+
+        self.call_later(_do_refresh)
+
+    def _apply_summary(self, summary: dict[str, Any]) -> None:
+        """Apply a pre-computed resource summary to the KPI widgets."""
         missing_cpu = summary.get("missing_cpu_request", "0")
         missing_mem = summary.get("missing_memory_request", "0")
         extreme = summary.get("extreme_ratios", "0")
@@ -1951,53 +2108,33 @@ class WorkloadsScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scr
             kpi.set_value(value)
             kpi.set_status(status)
 
-    def _workload_identity_key(self, workload: Any) -> tuple[str, str, str]:
+    @staticmethod
+    def _workload_identity_key(workload: Any) -> tuple[str, str, str]:
         return (
             str(getattr(workload, "namespace", "") or ""),
             str(getattr(workload, "kind", "") or ""),
             str(getattr(workload, "name", "") or ""),
         )
 
-    def _refresh_table(
+    def _apply_table(
         self,
         tab_id: str,
-        *,
-        filtered_workloads: list[Any] | None = None,
+        filtered_workloads: list[Any],
+        rows: list[Any],
+        columns: list[tuple[str, int]],
+        content_sig: tuple[Any, ...],
     ) -> None:
+        """Apply pre-computed rows/columns to the table widget (main thread)."""
         table_id = WORKLOADS_TABLE_ID_BY_TAB[tab_id]
-        columns = self._columns_for_tab(tab_id)
         column_names = tuple(name for name, _width in columns)
-        if filtered_workloads is None:
-            filter_kwargs = self._current_filter_kwargs()
-            filtered_workloads = self._presenter.get_filtered_workloads(
-                workload_view_filter=WORKLOAD_VIEW_FILTER_BY_TAB[tab_id],
-                search_query=self._search_query,
-                sort_by=self._sort_by,
-                descending=self._sort_desc,
-                **filter_kwargs,
-            )
 
         # Skip the expensive clear+rebuild if the table already shows the same rows.
-        # Use workload identity keys (namespace, kind, name) instead of id(w)
-        # because streaming recreates the list with new object references even
-        # when the actual workloads haven't changed.
-        content_sig = (
-            len(filtered_workloads),
-            tuple(self._workload_identity_key(w) for w in filtered_workloads),
-            column_names,
-            self._sort_by,
-            self._sort_desc,
-        )
         if (
             table_id in self._initialized_table_ids
             and content_sig == self._table_content_sig_by_id.get(table_id)
         ):
             return
 
-        rows = self._presenter.format_workload_rows(
-            filtered_workloads,
-            columns=columns,
-        )
         selected_identity: tuple[str, str, str] | None = None
         previous_row_workload_map = self._row_workload_map_by_table.get(table_id, {})
         row_workload_map = dict(enumerate(filtered_workloads))

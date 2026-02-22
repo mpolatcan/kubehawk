@@ -666,7 +666,8 @@ CustomFooterHints {
 #viol-loading-row,
 #rec-loading-row,
 #alert-loading-row,
-#activity-loading-row {
+#activity-loading-row,
+#impact-chart-loading-row {
     width: 1fr;
     min-width: 5;
     max-width: 100%;
@@ -687,7 +688,8 @@ CustomFooterHints {
 #viol-loading-indicator,
 #rec-loading-indicator,
 #alert-loading-indicator,
-#activity-loading-indicator {
+#activity-loading-indicator,
+#impact-chart-loading-indicator {
     dock: none;
     width: 1fr;
     min-width: 5;
@@ -700,7 +702,8 @@ CustomFooterHints {
 #viol-loading-indicator > LoadingIndicator,
 #rec-loading-indicator > LoadingIndicator,
 #alert-loading-indicator > LoadingIndicator,
-#activity-loading-indicator > LoadingIndicator {
+#activity-loading-indicator > LoadingIndicator,
+#impact-chart-loading-indicator > LoadingIndicator {
     width: 1fr;
     min-width: 5;
     height: 3;
@@ -712,7 +715,8 @@ CustomFooterHints {
 #viol-loading-message,
 #rec-loading-message,
 #alert-loading-message,
-#activity-loading-message {
+#activity-loading-message,
+#impact-chart-loading-message {
     width: 1fr;
     max-width: 100%;
     color: $accent;
@@ -726,7 +730,8 @@ CustomFooterHints {
 #viol-loading-message.error,
 #rec-loading-message.error,
 #alert-loading-message.error,
-#activity-loading-message.error {
+#activity-loading-message.error,
+#impact-chart-loading-message.error {
     color: $error;
     text-style: bold;
 }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import re
@@ -3385,29 +3386,32 @@ class ClusterScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scree
             else:
                 button.tooltip = None
 
-    def _sync_tab_filter_options(
+    def _compute_sync_filter_data(
         self,
         tab_id: str,
         table_data: list[tuple[list[tuple[str, int]], list[tuple]]],
-    ) -> None:
-        """Update per-tab filter options and keep selected values valid."""
+        *,
+        is_loading: bool,
+        last_sync_at: float,
+        cached_signature: int | None,
+        existing_selected: dict[str, set[str]],
+    ) -> dict[str, Any] | None:
+        """Compute heavy filter sync data off the main thread (pure data, no widgets).
+
+        Returns ``None`` when the sync should be skipped (throttled or unchanged).
+        Otherwise returns a dict with pre-computed values for ``_apply_sync_filter_data``.
+        """
         now = time.monotonic()
-        last_sync_at = self._tab_filter_last_sync_at.get(tab_id, 0.0)
         if (
-            self._presenter.is_loading
-            and tab_id in self._tab_filter_source_signatures
+            is_loading
+            and cached_signature is not None
             and now - last_sync_at < self._FILTER_OPTION_SYNC_LOADING_INTERVAL_SECONDS
         ):
-            self._update_filter_dialog_button(tab_id)
-            return
+            return None
 
         source_signature = self._table_data_signature(table_data)
-        if source_signature == self._tab_filter_source_signatures.get(tab_id):
-            self._tab_filter_last_sync_at[tab_id] = now
-            self._update_filter_dialog_button(tab_id)
-            return
-        self._tab_filter_source_signatures[tab_id] = source_signature
-        self._tab_filter_last_sync_at[tab_id] = now
+        if source_signature == cached_signature:
+            return {"skip_build": True, "source_signature": source_signature, "now": now}
 
         options_by_column = self._build_tab_string_filter_options(table_data)
         if tab_id == "tab-events":
@@ -3416,23 +3420,13 @@ class ClusterScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scree
                 for column_slug in self._EVENTS_FILTER_COLUMNS
                 if column_slug in options_by_column
             }
-        self._tab_column_filter_options[tab_id] = options_by_column
-        previous_truncated = self._tab_filter_truncated_columns.get(tab_id, 0)
-        self._tab_filter_truncated_columns[tab_id] = (
-            self._last_filter_truncated_column_count
-        )
-        if previous_truncated == 0 and self._last_filter_truncated_column_count > 0:
-            with suppress(Exception):
-                if self.is_current:
-                    self.app.notify(
-                        "Some filter columns are truncated to keep the UI responsive.",
-                        severity="warning",
-                        timeout=4,
-                    )
 
+        truncated_count = self._last_filter_truncated_column_count
+
+        # Sanitize selected values against new options (pure data)
         selected_map: dict[str, set[str]] = {
             column_slug: set(values)
-            for column_slug, values in self._tab_column_filter_values.get(tab_id, {}).items()
+            for column_slug, values in existing_selected.items()
         }
         selected_map = {
             column_slug: selected_value
@@ -3447,8 +3441,71 @@ class ClusterScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scree
             if selected_values == valid_values:
                 selected_values = set()
             selected_map[column_slug] = selected_values
-        self._tab_column_filter_values[tab_id] = selected_map
+
+        return {
+            "skip_build": False,
+            "source_signature": source_signature,
+            "now": now,
+            "options_by_column": options_by_column,
+            "truncated_count": truncated_count,
+            "selected_map": selected_map,
+        }
+
+    def _apply_sync_filter_data(
+        self,
+        tab_id: str,
+        computed: dict[str, Any] | None,
+    ) -> None:
+        """Apply pre-computed filter sync data to UI state (must run on main thread)."""
+        if computed is None:
+            # Throttled — just refresh the button label
+            self._update_filter_dialog_button(tab_id)
+            return
+
+        now: float = computed["now"]
+        source_signature: int = computed["source_signature"]
+
+        if computed["skip_build"]:
+            self._tab_filter_last_sync_at[tab_id] = now
+            self._update_filter_dialog_button(tab_id)
+            return
+
+        self._tab_filter_source_signatures[tab_id] = source_signature
+        self._tab_filter_last_sync_at[tab_id] = now
+
+        options_by_column = computed["options_by_column"]
+        self._tab_column_filter_options[tab_id] = options_by_column
+
+        previous_truncated = self._tab_filter_truncated_columns.get(tab_id, 0)
+        truncated_count: int = computed["truncated_count"]
+        self._tab_filter_truncated_columns[tab_id] = truncated_count
+        if previous_truncated == 0 and truncated_count > 0:
+            with suppress(Exception):
+                if self.is_current:
+                    self.app.notify(
+                        "Some filter columns are truncated to keep the UI responsive.",
+                        severity="warning",
+                        timeout=4,
+                    )
+
+        self._tab_column_filter_values[tab_id] = computed["selected_map"]
         self._update_filter_dialog_button(tab_id)
+
+    def _sync_tab_filter_options(
+        self,
+        tab_id: str,
+        table_data: list[tuple[list[tuple[str, int]], list[tuple]]],
+    ) -> None:
+        """Update per-tab filter options and keep selected values valid."""
+        computed = self._compute_sync_filter_data(
+            tab_id,
+            table_data,
+            is_loading=self._presenter.is_loading,
+            last_sync_at=self._tab_filter_last_sync_at.get(tab_id, 0.0),
+            cached_signature=self._tab_filter_source_signatures.get(tab_id),
+            existing_selected=dict(self._tab_column_filter_values.get(tab_id, {})),
+        )
+        self._apply_sync_filter_data(tab_id, computed)
 
     def _row_matches_filter_value(
         self,
@@ -3651,26 +3708,51 @@ class ClusterScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scree
             slug = f"col_{index}"
         return f"{slug}_{index}"
 
-    def _update_table(
+    def _compute_table_update_data(
         self,
         table_id: str,
-        empty_id: str | None,
         columns: list[tuple[str, int]],
         rows: list[tuple],
         *,
         tab_id: str,
-    ) -> None:
-        """Update a DataTable widget with columns and rows."""
+    ) -> dict[str, Any]:
+        """Compute heavy table data off the main thread (pure data, no widgets).
+
+        Returns a dict with pre-computed values needed by ``_apply_table_update``.
+        """
         controlled_rows = self._apply_table_controls(rows, columns, tab_id=tab_id)
         column_signature = tuple(
             self._column_key_from_label(col_name, index)
             for index, (col_name, _) in enumerate(columns)
         )
         rows_signature = self._rows_signature(controlled_rows)
+        fixed_columns = self._fixed_column_count_for_table(table_id, columns)
+        header_tooltips = self._cluster_table_header_tooltips(table_id, columns)
+        return {
+            "controlled_rows": controlled_rows,
+            "column_signature": column_signature,
+            "rows_signature": rows_signature,
+            "fixed_columns": fixed_columns,
+            "header_tooltips": header_tooltips,
+        }
+
+    def _apply_table_update(
+        self,
+        table_id: str,
+        empty_id: str | None,
+        columns: list[tuple[str, int]],
+        computed: dict[str, Any],
+    ) -> None:
+        """Apply pre-computed table data to UI widgets (must run on main thread)."""
+        controlled_rows: list[tuple] = computed["controlled_rows"]
+        column_signature: tuple[str, ...] = computed["column_signature"]
+        rows_signature: int = computed["rows_signature"]
+        fixed_columns: int = computed["fixed_columns"]
+        header_tooltips: dict[str, str] = computed["header_tooltips"]
+
         with suppress(NoMatches):
             table = self.query_one(f"#{table_id}", CustomDataTable)
-            fixed_columns = self._fixed_column_count_for_table(table_id, columns)
-            self._configure_cluster_table_header_tooltips(table, table_id, columns)
+            table.set_header_tooltips(header_tooltips)
             self._apply_table_width_policy(table, columns)
             previous_column_signature = self._table_column_signatures.get(table_id)
             previous_rows_signature = self._table_row_signatures.get(table_id)
@@ -3726,6 +3808,21 @@ class ClusterScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scree
                     empty.remove_class("hidden")
                 else:
                     empty.add_class("hidden")
+
+    def _update_table(
+        self,
+        table_id: str,
+        empty_id: str | None,
+        columns: list[tuple[str, int]],
+        rows: list[tuple],
+        *,
+        tab_id: str,
+    ) -> None:
+        """Update a DataTable widget with columns and rows."""
+        computed = self._compute_table_update_data(
+            table_id, columns, rows, tab_id=tab_id,
+        )
+        self._apply_table_update(table_id, empty_id, columns, computed)
 
     def _fixed_column_count_for_table(
         self,
@@ -4756,114 +4853,168 @@ class ClusterScreen(MainNavigationTabsMixin, WorkerMixin, ScreenNavigator, Scree
             self._set_tab_loading_overlay_visible(tab_id, False)
 
     def _refresh_tab(self, tab_id: str) -> None:
-        """Refresh a single tab's content."""
+        """Refresh a single tab's content.
+
+        Heavy data processing (filtering, sorting, signature computation) is
+        offloaded to a background thread via ``asyncio.to_thread`` so the UI
+        event loop stays responsive during tab switches and data updates.
+        A monotonically increasing sequence counter detects stale results when
+        a newer refresh supersedes this one before the thread completes.
+        """
+        if not hasattr(self, "_refresh_tab_seq_by_tab"):
+            self._refresh_tab_seq_by_tab: dict[str, int] = {}
+        self._refresh_tab_seq_by_tab[tab_id] = (
+            self._refresh_tab_seq_by_tab.get(tab_id, 0) + 1
+        )
+        seq = self._refresh_tab_seq_by_tab[tab_id]
+
+        # ---- Capture lightweight presenter snapshots (fast attribute access) ----
         p = self._presenter
         q = self.search_query
-        table_snapshots: list[tuple[list[tuple[str, int]], list[tuple]]] = []
 
-        def _update_table_with_snapshot(
-            table_id: str,
-            empty_id: str | None,
-            columns: list[tuple[str, int]],
-            rows: list[tuple],
-        ) -> None:
-            table_snapshots.append((columns, rows))
-            self._update_table(
-                table_id,
-                empty_id,
-                columns,
-                rows,
-                tab_id=tab_id,
-            )
+        # Collect per-table specs: (table_id, empty_id, columns, rows)
+        table_specs: list[tuple[str, str | None, list[tuple[str, int]], list[tuple]]] = []
 
         if tab_id == "tab-events":
-            self._update_events_summary_widgets(p)
-            _update_table_with_snapshot(
-                "events-detail-table",
-                None,
-                EVENTS_DETAIL_TABLE_COLUMNS,
-                p.filter_rows(p.get_event_detail_rows(), q),
-            )
-
+            event_detail_rows = p.filter_rows(p.get_event_detail_rows(), q)
+            table_specs.append((
+                "events-detail-table", None, EVENTS_DETAIL_TABLE_COLUMNS, event_detail_rows,
+            ))
         elif tab_id == "tab-nodes":
-            self._update_nodes_summary_widgets(p)
-            self._update_overview_alloc_widgets(p)
-            _update_table_with_snapshot(
-                "nodes-table",
-                None,
-                NODE_TABLE_COLUMNS,
-                p.filter_rows(p.get_node_rows(), q),
-            )
-            _update_table_with_snapshot(
-                "node-groups-table",
-                None,
-                p.get_node_group_columns(),
-                p.filter_rows(p.get_node_group_rows(), q),
-            )
+            node_rows = p.filter_rows(p.get_node_rows(), q)
+            table_specs.append(("nodes-table", None, NODE_TABLE_COLUMNS, node_rows))
+            ng_columns = p.get_node_group_columns()
+            ng_rows = p.filter_rows(p.get_node_group_rows(), q)
+            table_specs.append(("node-groups-table", None, ng_columns, ng_rows))
 
-        elif tab_id == "tab-pods":
-            self._update_workload_footprint_widgets(p)
-            self._update_overview_pod_stats_widgets(p)
+        # Snapshot state needed for filter sync computation
+        filter_sync_kwargs = {
+            "is_loading": p.is_loading,
+            "last_sync_at": self._tab_filter_last_sync_at.get(tab_id, 0.0),
+            "cached_signature": self._tab_filter_source_signatures.get(tab_id),
+            "existing_selected": dict(self._tab_column_filter_values.get(tab_id, {})),
+        }
 
-        filter_snapshots = table_snapshots
-        if tab_id == "tab-events" and table_snapshots:
-            # Event filters are derived from detailed event rows.
-            filter_snapshots = table_snapshots[-1:]
-        self._sync_tab_filter_options(tab_id, filter_snapshots)
-
-        # Keep full-tab loading overlay visible until all tab sources arrive.
+        # Loading overlay state (fast attribute access, no heavy work)
         data_keys = self._TAB_DATA_KEYS.get(tab_id, [])
-        loaded_keys = self._presenter.loaded_keys
-        error_keys = set(self._presenter.partial_errors.keys())
-        total_sources = len(data_keys)
-        resolved_count = sum(
-            1 for key in data_keys if key in loaded_keys or key in error_keys
-        )
-        error_count = sum(1 for key in data_keys if key in error_keys)
-        all_resolved = total_sources == 0 or resolved_count >= total_sources
-        has_any_payload = len(data_keys) > 0 and any(
-            self._has_source_payload(key) for key in data_keys
-        )
+        loaded_keys = p.loaded_keys
+        error_keys = set(p.partial_errors.keys())
 
-        tab_title = TAB_TITLES.get(tab_id, tab_id.removeprefix("tab-")).lower()
-        loading_label = (
-            self._TAB_LOADING_BASE_MESSAGES.get(tab_id, f"Loading {tab_title}...")
-        )
-        if total_sources > 0:
-            loading_status = f"Sources: {resolved_count}/{total_sources} loaded"
-        else:
-            loading_status = "No data sources registered for this tab"
-        if error_count:
-            loading_status += f" ({error_count} unavailable)"
-        self._set_tab_loading_text(
-            tab_id,
-            label_text=loading_label,
-            status_text=loading_status,
-        )
-        self._set_tab_loading_overlay_visible(
-            tab_id,
-            not all_resolved and not has_any_payload,
-        )
+        async def _do_refresh() -> None:
+            if self._refresh_tab_seq_by_tab.get(tab_id, 0) != seq:
+                return
 
-        # Resolve table overlays independently so one slow data source does not
-        # hide other summary tables that already have data.
-        for table_id in self._TAB_TABLE_IDS.get(tab_id, ()):
-            table_keys = self._TABLE_DATA_KEYS.get(table_id, tuple(data_keys))
-            table_resolved = (
-                len(table_keys) == 0
-                or all(key in loaded_keys or key in error_keys for key in table_keys)
+            # ---- UI summary widget updates (fast, must stay on main thread) ----
+            if tab_id == "tab-events":
+                self._update_events_summary_widgets(p)
+            elif tab_id == "tab-nodes":
+                self._update_nodes_summary_widgets(p)
+                self._update_overview_alloc_widgets(p)
+            elif tab_id == "tab-pods":
+                self._update_workload_footprint_widgets(p)
+                self._update_overview_pod_stats_widgets(p)
+
+            # ---- Heavy CPU work: offload to thread ----
+            table_snapshots: list[tuple[list[tuple[str, int]], list[tuple]]] = []
+            computed_tables: list[tuple[str, str | None, list[tuple[str, int]], dict[str, Any]]] = []
+
+            if table_specs:
+                def _compute_all() -> tuple[
+                    list[tuple[str, str | None, list[tuple[str, int]], dict[str, Any]]],
+                    list[tuple[list[tuple[str, int]], list[tuple]]],
+                    dict[str, Any] | None,
+                ]:
+                    """Run all heavy data processing in a single thread hop."""
+                    _computed: list[tuple[str, str | None, list[tuple[str, int]], dict[str, Any]]] = []
+                    _snapshots: list[tuple[list[tuple[str, int]], list[tuple]]] = []
+                    for t_id, e_id, cols, rws in table_specs:
+                        cd = self._compute_table_update_data(
+                            t_id, cols, rws, tab_id=tab_id,
+                        )
+                        _computed.append((t_id, e_id, cols, cd))
+                        _snapshots.append((cols, rws))
+
+                    filter_snaps = _snapshots
+                    if tab_id == "tab-events" and _snapshots:
+                        filter_snaps = _snapshots[-1:]
+                    _filter_computed = self._compute_sync_filter_data(
+                        tab_id, filter_snaps, **filter_sync_kwargs,
+                    )
+                    return _computed, _snapshots, _filter_computed
+
+                result = await asyncio.to_thread(_compute_all)
+                if self._refresh_tab_seq_by_tab.get(tab_id, 0) != seq:
+                    return
+                computed_tables, table_snapshots, filter_computed = result
+            else:
+                # No tables for this tab (e.g. tab-pods) — still sync filters
+                filter_computed = await asyncio.to_thread(
+                    self._compute_sync_filter_data,
+                    tab_id, [], **filter_sync_kwargs,
+                )
+                if self._refresh_tab_seq_by_tab.get(tab_id, 0) != seq:
+                    return
+
+            # ---- Apply UI updates on main thread ----
+            for t_id, e_id, cols, cd in computed_tables:
+                self._apply_table_update(t_id, e_id, cols, cd)
+
+            self._apply_sync_filter_data(tab_id, filter_computed)
+
+            # ---- Loading overlay logic (lightweight, main thread) ----
+            total_sources = len(data_keys)
+            resolved_count = sum(
+                1 for key in data_keys if key in loaded_keys or key in error_keys
             )
-            has_partial_payload = (
-                len(table_keys) > 0
-                and any(self._has_source_payload(key) for key in table_keys)
-            )
-            self._set_table_overlay_visible(
-                table_id,
-                not table_resolved and not has_partial_payload,
+            error_count = sum(1 for key in data_keys if key in error_keys)
+            all_resolved = total_sources == 0 or resolved_count >= total_sources
+            has_any_payload = len(data_keys) > 0 and any(
+                self._has_source_payload(key) for key in data_keys
             )
 
-        if all_resolved:
-            self._populated_tabs.add(tab_id)
+            tab_title = TAB_TITLES.get(tab_id, tab_id.removeprefix("tab-")).lower()
+            loading_label = (
+                self._TAB_LOADING_BASE_MESSAGES.get(tab_id, f"Loading {tab_title}...")
+            )
+            if total_sources > 0:
+                loading_status = f"Sources: {resolved_count}/{total_sources} loaded"
+            else:
+                loading_status = "No data sources registered for this tab"
+            if error_count:
+                loading_status += f" ({error_count} unavailable)"
+            self._set_tab_loading_text(
+                tab_id,
+                label_text=loading_label,
+                status_text=loading_status,
+            )
+            self._set_tab_loading_overlay_visible(
+                tab_id,
+                not all_resolved and not has_any_payload,
+            )
+
+            # Resolve table overlays independently so one slow data source does
+            # not hide other summary tables that already have data.
+            for tid in self._TAB_TABLE_IDS.get(tab_id, ()):
+                table_keys = self._TABLE_DATA_KEYS.get(tid, tuple(data_keys))
+                table_resolved = (
+                    len(table_keys) == 0
+                    or all(
+                        key in loaded_keys or key in error_keys for key in table_keys
+                    )
+                )
+                has_partial_payload = (
+                    len(table_keys) > 0
+                    and any(self._has_source_payload(key) for key in table_keys)
+                )
+                self._set_table_overlay_visible(
+                    tid,
+                    not table_resolved and not has_partial_payload,
+                )
+
+            if all_resolved:
+                self._populated_tabs.add(tab_id)
+
+        self.call_later(_do_refresh)
 
     def _has_source_payload(self, source_key: str) -> bool:
         """Return True when presenter currently has non-empty data for source key."""
