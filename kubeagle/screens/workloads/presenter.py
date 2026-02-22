@@ -203,7 +203,19 @@ class WorkloadsPresenter:
 
             if force_refresh:
                 ClusterController.clear_global_command_cache(context=context)
-            ctrl = ClusterController(context=context)
+            ctrl = ClusterController(
+                context=context,
+                progressive_yield_interval=getattr(
+                    getattr(self._screen.app, "settings", None),
+                    "progressive_yield_interval",
+                    2,
+                ),
+                progressive_parallelism=getattr(
+                    getattr(self._screen.app, "settings", None),
+                    "progressive_parallelism",
+                    2,
+                ),
+            )
             # Cache controller for reuse by fetch_live_usage_sample
             self._cached_ctrl = ctrl
 
@@ -293,7 +305,19 @@ class WorkloadsPresenter:
             )
             current_context = await ClusterController.resolve_current_context_async()
             context = current_context or configured_context
-            ctrl = ClusterController(context=context)
+            ctrl = ClusterController(
+                context=context,
+                progressive_yield_interval=getattr(
+                    getattr(app, "settings", None),
+                    "progressive_yield_interval",
+                    2,
+                ),
+                progressive_parallelism=getattr(
+                    getattr(app, "settings", None),
+                    "progressive_parallelism",
+                    2,
+                ),
+            )
             self._cached_ctrl = ctrl
         return await ctrl.fetch_workload_live_usage_sample(
             namespace=str(getattr(workload, "namespace", "") or ""),

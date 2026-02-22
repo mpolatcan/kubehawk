@@ -16,6 +16,15 @@ from kubeagle.optimizer.resource_impact_calculator import (
     ResourceImpactCalculator,
     _build_instance_types,
 )
+from kubeagle.optimizer.rules import configure_rule_thresholds
+
+
+@pytest.fixture(autouse=True)
+def _clear_fixed_resource_fields():
+    """Ensure tests run without fixed resource field restrictions."""
+    configure_rule_thresholds(fixed_resource_fields=set())
+    yield
+    configure_rule_thresholds(fixed_resource_fields=set())
 
 
 def _make_chart(
@@ -114,18 +123,18 @@ class TestResourceImpactCalculatorNoViolations:
 
 
 class TestResourceImpactCalculatorWithViolations:
-    def test_res005_reduces_cpu_limit(self) -> None:
-        """RES005 (high CPU ratio) should reduce CPU limits."""
+    def test_res005_increases_cpu_request(self) -> None:
+        """RES005 (high CPU ratio) should increase request, never decrease limit."""
         chart = _make_chart(cpu_request=100.0, cpu_limit=1000.0, replicas=1)
         violation = _make_violation("RES005", "test-chart")
         calc = ResourceImpactCalculator()
 
         result = calc.compute_impact([chart], [violation])
 
-        # After should have reduced CPU limit (1.5x request = 150m)
-        assert result.after.cpu_limit_total < result.before.cpu_limit_total
-        assert result.delta.cpu_limit_diff < 0
-        assert result.delta.cpu_limit_pct < 0
+        # After: request increased to limit/1.5, limit unchanged
+        assert result.after.cpu_request_total > result.before.cpu_request_total
+        assert result.after.cpu_limit_total == result.before.cpu_limit_total
+        assert result.delta.cpu_limit_diff == 0
 
     def test_res004_adds_requests(self) -> None:
         """RES004 (no requests) should add CPU+memory requests."""
@@ -259,8 +268,9 @@ class TestResourceDelta:
 
         result = calc.compute_impact([chart], [violation])
 
-        # Delta percentage should be negative (savings)
-        assert result.delta.cpu_limit_pct < 0
+        # RES005 increases request, limit stays unchanged
+        assert result.delta.cpu_request_pct > 0
+        assert result.delta.cpu_limit_pct == 0
 
     def test_zero_baseline_no_divide_by_zero(self) -> None:
         """When before is zero, percentage should handle gracefully."""
@@ -325,8 +335,9 @@ class TestWithOptimizerController:
             [chart], [violation], optimizer_controller=controller
         )
 
-        # Should still compute an after value (default fallback)
-        assert result.after.cpu_limit_total < result.before.cpu_limit_total
+        # Default fallback: request increased, limit unchanged
+        assert result.after.cpu_request_total > result.before.cpu_request_total
+        assert result.after.cpu_limit_total == result.before.cpu_limit_total
 
     def test_falls_back_when_controller_raises(self) -> None:
         """When controller raises, should use default fix."""
@@ -341,7 +352,8 @@ class TestWithOptimizerController:
             [chart], [violation], optimizer_controller=controller
         )
 
-        assert result.after.cpu_limit_total < result.before.cpu_limit_total
+        assert result.after.cpu_request_total > result.before.cpu_request_total
+        assert result.after.cpu_limit_total == result.before.cpu_limit_total
 
 
 class TestNonResourceViolationsIgnored:
@@ -474,8 +486,8 @@ class TestSpotPricing:
             est.cost_before_monthly - est.cost_after_monthly
         )
 
-    def test_node_estimation_savings_with_reduction(self) -> None:
-        """When violations reduce resources, cost savings should be positive."""
+    def test_node_estimation_with_request_increase(self) -> None:
+        """RES005 increases requests (right-sizing) which may need more nodes."""
         chart = _make_chart(cpu_request=100.0, cpu_limit=1000.0, replicas=10)
         violation = _make_violation("RES005", "test-chart")
         calc = ResourceImpactCalculator()
@@ -485,8 +497,8 @@ class TestSpotPricing:
         )
 
         est = result.node_estimations[0]
-        # No node reduction for tiny workloads (both need 1 node)
-        assert est.cost_savings_monthly >= 0
+        # Request increased → may need more nodes (cost can increase)
+        assert est.nodes_after >= est.nodes_before
 
     def test_cluster_node_spot_price_lookup(self) -> None:
         """Cluster node group should look up spot price from SPOT_PRICES."""

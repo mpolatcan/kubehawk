@@ -57,14 +57,11 @@ def test_default_full_fix_template_exposes_rule_guidance_lines() -> None:
     assert FULL_FIX_PROMPT_TOKEN_SEED_YAML in template
     assert FULL_FIX_PROMPT_TOKEN_ALLOWED_FILES in template
     assert "- PRB001: Use `livenessProbe` under workload container config." in template
-    assert (
-        "- RES005: Treat current CPU limit as correct; increase only request so "
-        "`resources.requests.cpu` is about 85% of `resources.limits.cpu`."
-    ) in template
-    assert (
-        "- RES006: Treat current memory limit as correct; increase only request so "
-        "`resources.requests.memory` is about 85% of `resources.limits.memory`."
-    ) in template
+    assert "- RES005:" in template
+    assert "- RES006:" in template
+    assert "- RES007:" in template
+    # Verify rule ordering constraint is present
+    assert "RULE ORDERING" in template
 
 
 def test_generate_ai_full_fix_direct_edit_uses_template_mode_when_tokens_present(

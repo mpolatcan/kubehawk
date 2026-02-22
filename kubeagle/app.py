@@ -237,7 +237,8 @@ class EKSHelmReporterApp(App[None]):
     def apply_optimizer_settings(self) -> None:
         """Apply settings that influence optimizer rule evaluation."""
         configure_rule_thresholds(
-            limit_request_ratio_threshold=self.settings.limit_request_ratio_threshold
+            limit_request_ratio_threshold=self.settings.limit_request_ratio_threshold,
+            fixed_resource_fields=set(self.settings.fixed_resource_fields),
         )
 
     def _apply_theme(self) -> None:

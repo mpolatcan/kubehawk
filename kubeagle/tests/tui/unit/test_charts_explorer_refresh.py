@@ -189,7 +189,7 @@ def test_optimizer_partial_event_updates_progress_and_stream_buffer(
     monkeypatch.setattr(
         screen,
         "_update_optimizer_loading_message",
-        lambda message: progress_messages.append(message),
+        lambda message, progress_percent=None: progress_messages.append(message),
     )
     monkeypatch.setattr(
         ChartsExplorerScreen,
@@ -250,7 +250,7 @@ def test_optimizer_partial_event_clears_table_loading_before_stream_update(
     monkeypatch.setattr(
         screen,
         "_update_optimizer_loading_message",
-        lambda message: progress_messages.append(message),
+        lambda message, progress_percent=None: progress_messages.append(message),
     )
     monkeypatch.setattr(
         ChartsExplorerScreen,
@@ -335,7 +335,7 @@ def test_optimizer_partial_event_throttles_ui_rerenders_between_first_and_final(
     monkeypatch.setattr(
         screen,
         "_update_optimizer_loading_message",
-        lambda _message: None,
+        lambda _message, _progress_percent=None: None,
     )
     monkeypatch.setattr(
         ChartsExplorerScreen,

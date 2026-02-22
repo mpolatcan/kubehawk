@@ -42,13 +42,15 @@ from kubeagle.optimizer.rules import (
 
 @pytest.fixture(autouse=True)
 def _reset_limit_ratio_threshold() -> Generator[None, None, None]:
-    """Keep per-test isolation for runtime-mutable ratio threshold."""
+    """Keep per-test isolation for runtime-mutable ratio threshold and fixed fields."""
     configure_rule_thresholds(
-        limit_request_ratio_threshold=DEFAULT_LIMIT_REQUEST_RATIO_THRESHOLD
+        limit_request_ratio_threshold=DEFAULT_LIMIT_REQUEST_RATIO_THRESHOLD,
+        fixed_resource_fields=set(),
     )
     yield
     configure_rule_thresholds(
-        limit_request_ratio_threshold=DEFAULT_LIMIT_REQUEST_RATIO_THRESHOLD
+        limit_request_ratio_threshold=DEFAULT_LIMIT_REQUEST_RATIO_THRESHOLD,
+        fixed_resource_fields=set(),
     )
 
 

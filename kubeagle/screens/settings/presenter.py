@@ -84,9 +84,15 @@ class SettingsPresenter:
             "ai-fix-claude-model-select": self._settings.ai_fix_claude_model,
             "ai-fix-full-fix-prompt-input": self._settings.ai_fix_full_fix_system_prompt,
             "ai-fix-bulk-parallelism-input": self._settings.ai_fix_bulk_parallelism,
+            "progressive-parallelism-select": self._settings.progressive_parallelism,
+            "progressive-yield-interval-select": self._settings.progressive_yield_interval,
             "use-cluster-values-switch": self._settings.use_cluster_values,
             "use-cluster-mode-switch": self._settings.use_cluster_mode,
             "verify-fixes-render-switch": self._settings.verify_fixes_with_render,
+            "fix-cpu-request-switch": "cpu_request" in self._settings.fixed_resource_fields,
+            "fix-cpu-limit-switch": "cpu_limit" in self._settings.fixed_resource_fields,
+            "fix-memory-request-switch": "memory_request" in self._settings.fixed_resource_fields,
+            "fix-memory-limit-switch": "memory_limit" in self._settings.fixed_resource_fields,
         }
         return mapping.get(setting_id, "")
 
@@ -113,12 +119,18 @@ class SettingsPresenter:
             HELM_TEMPLATE_TIMEOUT_SECONDS_DEFAULT,
             LIMIT_REQUEST_RATIO_THRESHOLD_DEFAULT,
             OPTIMIZER_ANALYSIS_SOURCE_DEFAULT,
+            PROGRESSIVE_PARALLELISM_DEFAULT,
+            PROGRESSIVE_YIELD_INTERVAL_DEFAULT,
             REFRESH_INTERVAL_DEFAULT,
             THEME_DEFAULT,
         )
         from kubeagle.constants.limits import (
             AI_FIX_BULK_PARALLELISM_MAX,
             AI_FIX_BULK_PARALLELISM_MIN,
+            PROGRESSIVE_PARALLELISM_MAX,
+            PROGRESSIVE_PARALLELISM_MIN,
+            PROGRESSIVE_YIELD_INTERVAL_MAX,
+            PROGRESSIVE_YIELD_INTERVAL_MIN,
             REFRESH_INTERVAL_MIN,
         )
 
@@ -169,6 +181,18 @@ class SettingsPresenter:
         use_cluster_values = switch_values.get("use-cluster-values-switch", False)
         use_cluster_mode = switch_values.get("use-cluster-mode-switch", False)
         verify_fixes_with_render = switch_values.get("verify-fixes-render-switch", True)
+
+        # Collect fixed resource fields from switches
+        fixed_resource_fields: list[str] = []
+        _fixed_switch_map = {
+            "fix-cpu-request-switch": "cpu_request",
+            "fix-cpu-limit-switch": "cpu_limit",
+            "fix-memory-request-switch": "memory_request",
+            "fix-memory-limit-switch": "memory_limit",
+        }
+        for switch_id, field_name in _fixed_switch_map.items():
+            if switch_values.get(switch_id, field_name in {"cpu_limit", "memory_limit"}):
+                fixed_resource_fields.append(field_name)
         ai_fix_full_fix_system_prompt = str(
             input_values.get(
                 "ai-fix-full-fix-prompt-input",
@@ -179,6 +203,14 @@ class SettingsPresenter:
         ai_fix_bulk_parallelism = self._parse_int(
             input_values.get("ai-fix-bulk-parallelism-input", ""),
             AI_FIX_BULK_PARALLELISM_DEFAULT,
+        )
+        progressive_parallelism = self._parse_int(
+            input_values.get("progressive-parallelism-select", ""),
+            PROGRESSIVE_PARALLELISM_DEFAULT,
+        )
+        progressive_yield_interval = self._parse_int(
+            input_values.get("progressive-yield-interval-select", ""),
+            PROGRESSIVE_YIELD_INTERVAL_DEFAULT,
         )
 
         # Validate charts path
@@ -243,6 +275,24 @@ class SettingsPresenter:
                 f"{AI_FIX_BULK_PARALLELISM_MIN}-{AI_FIX_BULK_PARALLELISM_MAX}."
             )
             ai_fix_bulk_parallelism = AI_FIX_BULK_PARALLELISM_DEFAULT
+        if (
+            progressive_parallelism < PROGRESSIVE_PARALLELISM_MIN
+            or progressive_parallelism > PROGRESSIVE_PARALLELISM_MAX
+        ):
+            errors.append(
+                "Progressive parallelism must be between "
+                f"{PROGRESSIVE_PARALLELISM_MIN}-{PROGRESSIVE_PARALLELISM_MAX}."
+            )
+            progressive_parallelism = PROGRESSIVE_PARALLELISM_DEFAULT
+        if (
+            progressive_yield_interval < PROGRESSIVE_YIELD_INTERVAL_MIN
+            or progressive_yield_interval > PROGRESSIVE_YIELD_INTERVAL_MAX
+        ):
+            errors.append(
+                "Progressive yield interval must be between "
+                f"{PROGRESSIVE_YIELD_INTERVAL_MIN}-{PROGRESSIVE_YIELD_INTERVAL_MAX}."
+            )
+            progressive_yield_interval = PROGRESSIVE_YIELD_INTERVAL_DEFAULT
         template_error = validate_full_fix_prompt_template(ai_fix_full_fix_system_prompt)
         if template_error:
             errors.append(template_error)
@@ -274,6 +324,9 @@ class SettingsPresenter:
         self._settings.ai_fix_claude_model = ai_fix_claude_model
         self._settings.ai_fix_full_fix_system_prompt = ai_fix_full_fix_system_prompt
         self._settings.ai_fix_bulk_parallelism = ai_fix_bulk_parallelism
+        self._settings.progressive_parallelism = progressive_parallelism
+        self._settings.progressive_yield_interval = progressive_yield_interval
+        self._settings.fixed_resource_fields = fixed_resource_fields
 
         # Save to file
         try:

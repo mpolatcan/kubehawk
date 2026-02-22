@@ -393,7 +393,19 @@ class ReportExportScreen(MainNavigationTabsMixin, ScreenNavigator, WorkerMixin, 
 
             # Setup cluster controller
             try:
-                cluster_ctrl = ClusterController(context=cluster_context)
+                cluster_ctrl = ClusterController(
+                    context=cluster_context,
+                    progressive_yield_interval=getattr(
+                        getattr(app, "settings", None),
+                        "progressive_yield_interval",
+                        2,
+                    ),
+                    progressive_parallelism=getattr(
+                        getattr(app, "settings", None),
+                        "progressive_parallelism",
+                        2,
+                    ),
+                )
             except Exception:
                 cluster_ctrl = None
 
@@ -410,7 +422,18 @@ class ReportExportScreen(MainNavigationTabsMixin, ScreenNavigator, WorkerMixin, 
                 elif Path(charts_path, "CODEOWNERS").exists():
                     codeowners_path = Path(charts_path, "CODEOWNERS")
                 charts_ctrl = ChartsController(
-                    charts_path, codeowners_path=codeowners_path
+                    charts_path,
+                    codeowners_path=codeowners_path,
+                    progressive_yield_interval=getattr(
+                        getattr(app, "settings", None),
+                        "progressive_yield_interval",
+                        2,
+                    ),
+                    progressive_parallelism=getattr(
+                        getattr(app, "settings", None),
+                        "progressive_parallelism",
+                        2,
+                    ),
                 )
             else:
                 charts_ctrl = None

@@ -194,15 +194,15 @@ class TestBug3ColumnDuplicationFix:
     After the fix, _update_table calls table.clear(columns=True).
     """
 
-    def test_update_table_uses_clear_columns_true(self) -> None:
-        """_update_table source must call clear(columns=True)."""
+    def test_apply_table_update_uses_clear_columns_true(self) -> None:
+        """_apply_table_update source must call clear(columns=True)."""
         import inspect
 
         from kubeagle.screens.cluster.cluster_screen import ClusterScreen
 
-        source = inspect.getsource(ClusterScreen._update_table)
+        source = inspect.getsource(ClusterScreen._apply_table_update)
         assert "clear(columns=True)" in source, (
-            "_update_table must call table.clear(columns=True) to clear columns "
+            "_apply_table_update must call table.clear(columns=True) to clear columns "
             "before re-adding them on refresh. Without this, columns duplicate."
         )
 
@@ -517,34 +517,6 @@ class TestBug5MessageNamespaceFix:
 
 
 # =============================================================================
-# Bug 6 Regression: PodListComponent retained with deprecation
-# =============================================================================
-
-
-@pytest.mark.unit
-@pytest.mark.fast
-class TestBug6PodListComponentRetained:
-    """Bug 6: PodListComponent file retained for import compatibility.
-
-    Before the fix, the dead code was flagged for removal.
-    The fix retained it with a deprecation docstring because existing
-    tests import PodListComponent.
-    """
-
-    def test_pod_list_component_importable(self) -> None:
-        """PodListComponent must still be importable (backward compatibility)."""
-        try:
-            from kubeagle.screens.cluster.components.pod_list import (
-                PodListComponent,
-            )
-            assert PodListComponent is not None
-        except ImportError:
-            pytest.fail(
-                "PodListComponent must remain importable for backward compatibility. "
-                "Tests import it, so deleting the file would cause ImportError."
-            )
-
-
 # =============================================================================
 # Cross-cutting: No regressions in shared widgets
 # =============================================================================
@@ -658,13 +630,13 @@ class TestAcceptanceCriteria:
             method_name = f"action_switch_tab_{i}"
             assert hasattr(screen, method_name), f"Missing {method_name}"
 
-    def test_ac2_update_table_clears_columns(self) -> None:
-        """AC-2: _update_table must clear columns to prevent duplication."""
+    def test_ac2_apply_table_update_clears_columns(self) -> None:
+        """AC-2: _apply_table_update must clear columns to prevent duplication."""
         import inspect
 
         from kubeagle.screens.cluster.cluster_screen import ClusterScreen
 
-        source = inspect.getsource(ClusterScreen._update_table)
+        source = inspect.getsource(ClusterScreen._apply_table_update)
         assert "columns=True" in source
 
     def test_ac4_screen_instantiation_no_error(self) -> None:

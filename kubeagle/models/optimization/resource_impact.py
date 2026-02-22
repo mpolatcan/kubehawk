@@ -10,6 +10,7 @@ class ChartResourceSnapshot(BaseModel):
 
     name: str
     team: str
+    values_file_type: str = ""
     replicas: int
     cpu_request_per_replica: float  # millicores
     cpu_limit_per_replica: float  # millicores

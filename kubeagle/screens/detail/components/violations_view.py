@@ -80,9 +80,6 @@ from kubeagle.screens.detail.components.fix_details_modal import (
 from kubeagle.screens.detail.components.recommendations_view import (
     RecommendationsView,
 )
-from kubeagle.screens.detail.components.resource_impact_view import (
-    ResourceImpactView,
-)
 from kubeagle.screens.detail.config import (
     OPTIMIZER_HEADER_TOOLTIPS,
     OPTIMIZER_TABLE_COLUMNS,
@@ -91,9 +88,6 @@ from kubeagle.screens.detail.config import (
     SORT_SELECT_OPTIONS,
     SORT_SEVERITY,
     SORT_TEAM,
-    VIEW_IMPACT,
-    VIEW_OPTIONS,
-    VIEW_VIOLATIONS,
 )
 from kubeagle.widgets import (
     CustomButton,
@@ -3693,28 +3687,6 @@ class ViolationsView(CustomVertical):
                     id="sort-group",
                     classes="optimizer-filter-group",
                 ),
-                CustomContainer(
-                    CustomStatic("View", classes="optimizer-filter-group-title"),
-                    CustomHorizontal(
-                        CustomVertical(
-                            Select(
-                                [
-                                    (_prefixed_option("View", label), value)
-                                    for label, value in VIEW_OPTIONS
-                                ],
-                                value=VIEW_VIOLATIONS,
-                                allow_blank=False,
-                                id="view-select",
-                                classes="filter-select cluster-tab-control-select",
-                            ),
-                            id="view-control",
-                            classes="filter-control",
-                        ),
-                        classes="optimizer-filter-group-body",
-                    ),
-                    id="view-group",
-                    classes="optimizer-filter-group",
-                ),
                 id="filter-row",
             ),
             id="filter-bar",
@@ -3769,6 +3741,7 @@ class ViolationsView(CustomVertical):
                     CustomButton("Fix All", id="apply-all-btn"),
                     CustomButton("Fix Violation", id="fix-selected-btn"),
                     CustomButton("Fix Selected Chart", id="fix-all-selected-btn"),
+                    CustomButton("Impact Analysis", id="impact-analysis-btn"),
                     CustomStatic("", id="action-bar-right-spacer"),
                     id="action-bar",
                 ),
@@ -3777,9 +3750,6 @@ class ViolationsView(CustomVertical):
             RecommendationsView(
                 id="recommendations-view",
                 embedded=True,
-            ),
-            ResourceImpactView(
-                id="impact-analysis-view",
             ),
             id="optimizer-combined-content",
         )
@@ -3796,11 +3766,6 @@ class ViolationsView(CustomVertical):
             pass
         self._set_loading_overlay(True, "Loading violations...")
         self.set_recommendations_loading(True)
-        # Hide impact analysis view initially and set loading state
-        with contextlib.suppress(Exception):
-            impact_view = self.query_one("#impact-analysis-view", ResourceImpactView)
-            impact_view.display = False
-            impact_view.set_loading(True, "Waiting for optimizer data...")
         # First-pass UX: fix preview is shown via modal instead of inline side panel.
         with contextlib.suppress(Exception):
             self.query_one("#preview-panel", CustomVertical).display = False
@@ -3903,7 +3868,6 @@ class ViolationsView(CustomVertical):
 
             self._update_filter_status()
             self._sync_recommendations_filters()
-            self._compute_resource_impact()
             self._schedule_resize_update()
 
         self.call_later(_do_update)
@@ -4070,76 +4034,6 @@ class ViolationsView(CustomVertical):
                     self.severity_filter,
                 ),
             )
-
-    # ------------------------------------------------------------------
-    # Impact Analysis
-    # ------------------------------------------------------------------
-
-    def _compute_resource_impact(self) -> None:
-        """Compute and display resource impact analysis in a background thread."""
-        with contextlib.suppress(Exception):
-            from kubeagle.optimizer.resource_impact_calculator import (
-                ResourceImpactCalculator,
-            )
-
-            calculator = ResourceImpactCalculator()
-            controller = self._get_optimizer_controller()
-            # Snapshot data for the thread — avoid mutating shared state
-            charts = list(self.charts)
-            violations = list(self.violations)
-
-            def _do_compute() -> None:
-                result = calculator.compute_impact(
-                    charts,
-                    violations,
-                    optimizer_controller=controller,
-                )
-                # Schedule UI update back on the main thread
-                self.app.call_from_thread(
-                    self._apply_resource_impact, result, charts, violations, controller,
-                )
-
-            self.run_worker(_do_compute, thread=True, name="impact-compute", exclusive=True)
-
-    def _apply_resource_impact(
-        self,
-        result: object,
-        charts: list[object],
-        violations: list[object],
-        controller: object,
-    ) -> None:
-        """Apply computed resource impact result to the UI (main thread)."""
-        with contextlib.suppress(Exception):
-            impact_view = self.query_one("#impact-analysis-view", ResourceImpactView)
-            impact_view.set_source_data(
-                result,  # type: ignore[arg-type]
-                charts=charts,  # type: ignore[arg-type]
-                violations=violations,  # type: ignore[arg-type]
-                optimizer_controller=controller,
-            )
-
-    def show_impact_view(self) -> None:
-        """Show the impact analysis view and hide others."""
-        with contextlib.suppress(Exception):
-            self.query_one("#violations-left-pane", CustomVertical).display = False
-        with contextlib.suppress(Exception):
-            self.query_one("#recommendations-view", RecommendationsView).display = False
-        with contextlib.suppress(Exception):
-            self.query_one("#impact-analysis-view", ResourceImpactView).display = True
-
-    def hide_impact_view(self) -> None:
-        """Hide the impact analysis view."""
-        with contextlib.suppress(Exception):
-            self.query_one("#impact-analysis-view", ResourceImpactView).display = False
-
-    def show_violations_view(self) -> None:
-        """Show the violations view and hide others."""
-        with contextlib.suppress(Exception):
-            self.query_one("#violations-left-pane", CustomVertical).display = True
-        with contextlib.suppress(Exception):
-            self.query_one("#recommendations-view", RecommendationsView).display = True
-        with contextlib.suppress(Exception):
-            self.query_one("#impact-analysis-view", ResourceImpactView).display = False
 
     # ------------------------------------------------------------------
     # Chart indexes
@@ -4358,16 +4252,6 @@ class ViolationsView(CustomVertical):
             return
         self.sort_reverse = str(event.value) == "desc"
         self.populate_violations_table()
-
-    @on(Select.Changed, "#view-select")
-    def _on_view_changed(self, event: Select.Changed) -> None:
-        if event.value is Select.BLANK:
-            return
-        view_id = str(event.value)
-        if view_id == VIEW_VIOLATIONS:
-            self.show_violations_view()
-        elif view_id == VIEW_IMPACT:
-            self.show_impact_view()
 
     # ------------------------------------------------------------------
     # Table population
@@ -4841,13 +4725,46 @@ class ViolationsView(CustomVertical):
             self.query_one("#filters-btn", CustomButton).label = label
 
     def _handle_filters_btn(self) -> None:
-        """Route filter button to the correct modal based on active view."""
-        with contextlib.suppress(Exception):
-            impact_view = self.query_one("#impact-analysis-view", ResourceImpactView)
-            if impact_view.display:
-                impact_view.open_filters_modal()
-                return
+        """Open the violations filter modal."""
         self._open_filters_modal()
+
+    def _open_impact_analysis_dialog(self) -> None:
+        """Open the impact analysis dialog using the active optimizer filters.
+
+        Only charts that have at least one filtered violation are included,
+        so the chart count matches what the user sees in the violations table.
+        """
+        from kubeagle.screens.detail.components.impact_analysis_dialog import (
+            ImpactAnalysisDialog,
+        )
+
+        filtered_violations = self.get_filtered_violations(self.violations)
+        if not filtered_violations:
+            self.notify("No violations to analyze", severity="warning")
+            return
+        # Collect chart_paths and chart_names from filtered violations.
+        violation_paths: set[str] = set()
+        violation_names: set[str] = set()
+        for v in filtered_violations:
+            if v.chart_path:
+                violation_paths.add(v.chart_path)
+            violation_names.add(v.chart_name)
+        # Only include chart entries that actually have violations.
+        filtered_charts: list = []
+        for c in self.charts:
+            values_file = getattr(c, "values_file", "")
+            name = getattr(c, "name", "")
+            if values_file and values_file in violation_paths:
+                filtered_charts.append(c)
+            elif not values_file and name in violation_names:
+                filtered_charts.append(c)
+        controller = self._get_optimizer_controller()
+        dialog = ImpactAnalysisDialog(
+            charts=filtered_charts,
+            violations=filtered_violations,
+            optimizer_controller=controller,
+        )
+        self.app.push_screen(dialog)
 
     def _open_filters_modal(self) -> None:
         filter_options = {
@@ -5074,6 +4991,8 @@ class ViolationsView(CustomVertical):
             self.query_one("#sort-order-select", Select).disabled = not has_violations
         with contextlib.suppress(Exception):
             self.query_one("#preview-actions", CustomHorizontal).display = show_preview_actions
+        with contextlib.suppress(Exception):
+            self.query_one("#impact-analysis-btn", CustomButton).disabled = not has_violations
 
     # ------------------------------------------------------------------
     # Search
@@ -7252,6 +7171,8 @@ class ViolationsView(CustomVertical):
             self._toggle_advanced_filters()
         elif btn == "filters-btn":
             self._handle_filters_btn()
+        elif btn == "impact-analysis-btn":
+            self._open_impact_analysis_dialog()
 
     def _select_violation_at(self, event: object) -> None:
         """Select the violation at the row indicated by *event* and update buttons."""

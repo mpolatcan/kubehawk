@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+from pathlib import PurePosixPath
 from typing import Any
 
 from kubeagle.constants.instance_types import (
@@ -23,10 +24,27 @@ from kubeagle.models.optimization.resource_impact import (
     ResourceDelta,
     ResourceImpactResult,
 )
+import kubeagle.optimizer.rules as _optimizer_rules
 from kubeagle.optimizer.rules import _parse_cpu
 from kubeagle.utils.resource_parser import memory_str_to_bytes
 
 logger = logging.getLogger(__name__)
+
+
+def _values_file_type_from_path(values_file: str) -> str:
+    """Derive values file type label from a values file path."""
+    normalized = str(values_file or "").strip()
+    if not normalized:
+        return "Other"
+    file_name = PurePosixPath(normalized).name.lower()
+    if "automation" in file_name:
+        return "Automation"
+    if file_name == "values.yaml":
+        return "Main"
+    if "default" in file_name:
+        return "Default"
+    return "Other"
+
 
 # Rule IDs that change CPU/memory values
 RESOURCE_RULE_IDS: set[str] = {
@@ -45,6 +63,24 @@ REPLICA_RULE_IDS: set[str] = {"AVL005"}
 
 # All rule IDs that affect resource impact
 IMPACT_RULE_IDS: set[str] = RESOURCE_RULE_IDS | REPLICA_RULE_IDS
+
+# Application order: request-setting rules first, then limit-setting rules.
+# This ensures that limit rules (RES002, RES003, RES005, RES006) see the
+# already-updated request values from (RES004, RES007, RES008, RES009).
+_RULE_PRIORITY: dict[str, int] = {
+    # Phase 1 — set/bump requests
+    "RES004": 0,  # Add missing requests + limits (requests first)
+    "RES007": 1,  # Bump low CPU request
+    "RES008": 1,  # Add missing memory request
+    "RES009": 1,  # Bump low memory request
+    # Phase 2 — set/adjust limits (relative to requests)
+    "RES002": 2,  # Add CPU limit (2× request)
+    "RES003": 2,  # Add memory limit (2× request)
+    "RES005": 2,  # Reduce high CPU limit/request ratio
+    "RES006": 2,  # Reduce high memory limit/request ratio
+    # Phase 3 — replicas
+    "AVL005": 3,  # Increase replica count
+}
 
 
 def _build_instance_types(
@@ -163,6 +199,7 @@ class ResourceImpactCalculator:
         return ChartResourceSnapshot(
             name=chart.name,
             team=chart.team,
+            values_file_type=_values_file_type_from_path(getattr(chart, "values_file", "")),
             replicas=replicas,
             cpu_request_per_replica=cpu_req,
             cpu_limit_per_replica=cpu_lim,
@@ -192,7 +229,16 @@ class ResourceImpactCalculator:
         mem_req = chart.memory_request
         mem_lim = chart.memory_limit
 
-        for violation in chart_violations:
+        # Sort violations so request-setting rules run before limit-setting
+        # rules. This prevents limit rules from using stale request values.
+        sorted_violations = sorted(
+            chart_violations,
+            key=lambda v: _RULE_PRIORITY.get(
+                getattr(v, "rule_id", "") or getattr(v, "id", ""), 99
+            ),
+        )
+
+        for violation in sorted_violations:
             rule_id = getattr(violation, "rule_id", "") or getattr(violation, "id", "")
 
             # Try to get fix dict from controller
@@ -221,9 +267,18 @@ class ResourceImpactCalculator:
                 elif replicas < 2:
                     replicas = 2
 
+        # Ensure limits are never less than requests (fixes can be applied
+        # in an order that makes them inconsistent, e.g. RES005 reduces
+        # the limit based on the old request, then RES007 bumps the request).
+        if cpu_lim > 0 and cpu_lim < cpu_req:
+            cpu_lim = cpu_req * 1.5
+        if mem_lim > 0 and mem_lim < mem_req:
+            mem_lim = mem_req * 1.5
+
         return ChartResourceSnapshot(
             name=chart.name,
             team=chart.team,
+            values_file_type=_values_file_type_from_path(getattr(chart, "values_file", "")),
             replicas=replicas,
             cpu_request_per_replica=cpu_req,
             cpu_limit_per_replica=cpu_lim,
@@ -247,20 +302,21 @@ class ResourceImpactCalculator:
         resources = fix_dict.get("resources", {})
         requests = resources.get("requests", {})
         limits = resources.get("limits", {})
+        fixed = _optimizer_rules.FIXED_RESOURCE_FIELDS
 
-        if "cpu" in requests:
+        if "cpu" in requests and "cpu_request" not in fixed:
             parsed = _parse_cpu(requests["cpu"])
             if parsed is not None:
                 cpu_req = parsed
-        if "cpu" in limits:
+        if "cpu" in limits and "cpu_limit" not in fixed:
             parsed = _parse_cpu(limits["cpu"])
             if parsed is not None:
                 cpu_lim = parsed
-        if "memory" in requests:
+        if "memory" in requests and "memory_request" not in fixed:
             parsed_bytes = memory_str_to_bytes(str(requests["memory"]))
             if parsed_bytes > 0:
                 mem_req = parsed_bytes
-        if "memory" in limits:
+        if "memory" in limits and "memory_limit" not in fixed:
             parsed_bytes = memory_str_to_bytes(str(limits["memory"]))
             if parsed_bytes > 0:
                 mem_lim = parsed_bytes
@@ -276,39 +332,44 @@ class ResourceImpactCalculator:
         mem_lim: float,
     ) -> tuple[float, float, float, float]:
         """Apply default fix values when optimizer controller is not available."""
+        fixed = _optimizer_rules.FIXED_RESOURCE_FIELDS
         if rule_id == "RES002":
             # No CPU limit -> set to 2x request or 500m
-            cpu_lim = max(cpu_req * 2, 500.0) if cpu_req > 0 else 500.0
+            if "cpu_limit" not in fixed:
+                cpu_lim = max(cpu_req * 2, 500.0) if cpu_req > 0 else 500.0
         elif rule_id == "RES003":
             # No memory limit -> set to 2x request or 512Mi
-            mem_lim = max(mem_req * 2, 512 * 1024**2) if mem_req > 0 else 512 * 1024**2
+            if "memory_limit" not in fixed:
+                mem_lim = max(mem_req * 2, 512 * 1024**2) if mem_req > 0 else 512 * 1024**2
         elif rule_id == "RES004":
             # No requests -> add defaults
-            if cpu_req == 0:
+            if cpu_req == 0 and "cpu_request" not in fixed:
                 cpu_req = 100.0
-            if mem_req == 0:
+            if mem_req == 0 and "memory_request" not in fixed:
                 mem_req = 128 * 1024**2
-            if cpu_lim == 0:
+            if cpu_lim == 0 and "cpu_limit" not in fixed:
                 cpu_lim = 500.0
-            if mem_lim == 0:
+            if mem_lim == 0 and "memory_limit" not in fixed:
                 mem_lim = 512 * 1024**2
         elif rule_id == "RES005":
-            # High CPU ratio -> reduce limit to 1.5x request
-            if cpu_req > 0:
-                cpu_lim = cpu_req * 1.5
+            # High CPU ratio — increase request to bring ratio to 1.5x.
+            # Limits are never decreased.
+            if cpu_lim > 0 and "cpu_request" not in fixed:
+                cpu_req = cpu_lim / 1.5
         elif rule_id == "RES006":
-            # High memory ratio -> reduce limit to 1.5x request
-            if mem_req > 0:
-                mem_lim = mem_req * 1.5
+            # High memory ratio — increase request to bring ratio to 1.5x.
+            # Limits are never decreased.
+            if mem_lim > 0 and "memory_request" not in fixed:
+                mem_req = mem_lim / 1.5
         elif rule_id == "RES007":
-            # Very low CPU request -> bump to 100m
+            # Very low CPU request -> bump to 100m (exempt from fixed fields)
             cpu_req = max(cpu_req, 100.0)
         elif rule_id == "RES008":
             # No memory request -> add 128Mi
-            if mem_req == 0:
+            if mem_req == 0 and "memory_request" not in fixed:
                 mem_req = 128 * 1024**2
         elif rule_id == "RES009":
-            # Very low memory request -> bump to 128Mi
+            # Very low memory request -> bump to 128Mi (exempt from fixed fields)
             mem_req = max(mem_req, 128 * 1024**2)
 
         return cpu_req, cpu_lim, mem_req, mem_lim

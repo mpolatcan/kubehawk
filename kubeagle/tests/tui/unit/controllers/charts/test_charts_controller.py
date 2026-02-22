@@ -200,7 +200,7 @@ class TestChartsControllerClusterStreaming:
         """Test streaming release fetch maps HelmReleaseInfo objects to dicts."""
 
         class _FakeClusterController:
-            def __init__(self, context: str | None = None) -> None:
+            def __init__(self, context: str | None = None, **_kwargs: object) -> None:
                 self.context = context
 
             async def get_helm_releases(self, on_namespace_update: object | None = None):

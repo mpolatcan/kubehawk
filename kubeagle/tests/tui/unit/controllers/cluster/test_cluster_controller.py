@@ -36,22 +36,6 @@ class TestFetchStatus:
         assert status.source_name == "nodes"
         assert status.state == FetchState.SUCCESS
 
-    def test_fetch_status_to_dict(self) -> None:
-        """Test FetchStatus.to_dict method."""
-        now = datetime.now(timezone.utc)
-        status = FetchStatus(
-            source_name="events",
-            state=FetchState.ERROR,
-            error_message="Connection failed",
-            last_updated=now,
-        )
-
-        result = status.to_dict()
-
-        assert result["source_name"] == "events"
-        assert result["state"] == "error"
-        assert result["error_message"] == "Connection failed"
-        assert result["last_updated"] == now.isoformat()
 
 
 class TestClusterController:

@@ -495,8 +495,8 @@ class TestOptimizerScreenWorker:
         screen = OptimizerScreen()
         composed = list(screen.compose())
         widget_ids = [w.id for w in self._flatten(composed) if hasattr(w, "id") and w.id]
-        # OptimizerScreen composes ViolationsView and RecommendationsView
-        assert "violations-view" in widget_ids
+        # ViolationsView is lazy-mounted; the container for it should exist
+        assert "tab-violations" in widget_ids
 
     @staticmethod
     def _flatten(widgets: list) -> list:

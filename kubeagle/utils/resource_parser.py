@@ -101,6 +101,26 @@ def memory_str_to_bytes(memory_str: str) -> float:
         return 0.0
 
 
+def _resolve_resources_dict(values: dict[str, Any]) -> dict[str, Any]:
+    """Resolve the resources dict, falling back to resources.default.
+
+    Some Helm charts nest resources under ``resources.default`` instead of
+    the standard ``resources.requests / resources.limits``.  This helper
+    returns the innermost dict that contains ``requests`` or ``limits``.
+    """
+    resources = values.get("resources", {})
+    if not isinstance(resources, dict):
+        return {}
+    # Standard layout: resources.requests / resources.limits
+    if "requests" in resources or "limits" in resources:
+        return resources
+    # Fallback: resources.default.requests / resources.default.limits
+    default = resources.get("default", {})
+    if isinstance(default, dict) and ("requests" in default or "limits" in default):
+        return default
+    return resources
+
+
 def parse_cpu_from_dict(
     values: dict[str, Any], container_type: str, resource: str
 ) -> float:
@@ -108,6 +128,7 @@ def parse_cpu_from_dict(
 
     Utility function to extract and parse CPU from a structure like:
     {"resources": {"limits": {"cpu": "100m"}}}
+    or the ``resources.default`` variant used by some charts.
 
     Args:
         values: Dictionary containing resource data
@@ -120,9 +141,7 @@ def parse_cpu_from_dict(
     try:
         if not isinstance(values, dict):
             return 0.0
-        resources = values.get("resources", {})
-        if not isinstance(resources, dict):
-            return 0.0
+        resources = _resolve_resources_dict(values)
         container_resources = resources.get(container_type, {})
         if not isinstance(container_resources, dict):
             return 0.0
@@ -141,6 +160,7 @@ def parse_memory_from_dict(
 
     Utility function to extract and parse memory from a structure like:
     {"resources": {"limits": {"memory": "512Mi"}}}
+    or the ``resources.default`` variant used by some charts.
 
     Args:
         values: Dictionary containing resource data
@@ -153,9 +173,7 @@ def parse_memory_from_dict(
     try:
         if not isinstance(values, dict):
             return 0.0
-        resources = values.get("resources", {})
-        if not isinstance(resources, dict):
-            return 0.0
+        resources = _resolve_resources_dict(values)
         container_resources = resources.get(container_type, {})
         if not isinstance(container_resources, dict):
             return 0.0

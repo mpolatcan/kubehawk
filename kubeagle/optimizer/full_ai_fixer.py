@@ -43,15 +43,44 @@ _DIRECT_EDIT_IGNORED_PATH_NAMES: tuple[str, ...] = (
 )
 
 _RULE_CANONICAL_VALUES_GUIDANCE: dict[str, str] = {
-    "AVL005": "Use `replicaCount` for replica scaling.",
+    # Phase 1 – request-setting rules (apply FIRST)
+    "RES004": (
+        "Set `resources.requests.memory` to a reasonable baseline (e.g. 128Mi). "
+        "Apply before any limit rules so limits can reference the updated request."
+    ),
+    "RES007": (
+        "Set `resources.requests.cpu` to at least 100m. "
+        "Apply before any limit rules so limits can reference the updated request."
+    ),
+    "RES008": (
+        "Set `resources.limits.cpu` to a reasonable baseline (e.g. 100m). "
+        "Apply before ratio-based limit rules."
+    ),
+    "RES009": (
+        "Set `resources.limits.memory` to a reasonable baseline (e.g. 128Mi). "
+        "Apply before ratio-based limit rules."
+    ),
+    # Phase 2 – limit-setting rules (apply AFTER request rules)
+    "RES002": (
+        "Set `resources.limits.memory`. Must be >= `resources.requests.memory`. "
+        "Use the updated request value if it was changed by another rule."
+    ),
+    "RES003": (
+        "Set `resources.limits.cpu`. Must be >= `resources.requests.cpu`. "
+        "Use the updated request value if it was changed by another rule."
+    ),
     "RES005": (
-        "Treat current CPU limit as correct; increase only request so "
-        "`resources.requests.cpu` is about 85% of `resources.limits.cpu`."
+        "Adjust CPU request/limit ratio: set `resources.requests.cpu` to about 85% of "
+        "`resources.limits.cpu`. If another rule increased the request, ensure the limit "
+        "is still >= the new request (limit = max(current_limit, request * 1.5))."
     ),
     "RES006": (
-        "Treat current memory limit as correct; increase only request so "
-        "`resources.requests.memory` is about 85% of `resources.limits.memory`."
+        "Adjust memory request/limit ratio: set `resources.requests.memory` to about 85% of "
+        "`resources.limits.memory`. If another rule increased the request, ensure the limit "
+        "is still >= the new request (limit = max(current_limit, request * 1.5))."
     ),
+    # Phase 3 – other rules
+    "AVL005": "Use `replicaCount` for replica scaling.",
     "PRB001": "Use `livenessProbe` under workload container config.",
     "PRB002": "Use `readinessProbe` under workload container config.",
     "PRB003": "Use `startupProbe` under workload container config.",
@@ -102,6 +131,9 @@ DEFAULT_FULL_FIX_SYSTEM_PROMPT_TEMPLATE = (
     "- Focus only on wiring and fixing changes; do not include verification steps or verification commentary.\n"
     "- Do not make no-op or unrelated edits; change only what is required for the listed violations.\n"
     "- Treat seed YAML as guidance only; prefer listed violations and existing chart wiring patterns when they conflict.\n"
+    "- RULE ORDERING: Apply request-setting rules (RES004, RES007, RES008, RES009) BEFORE "
+    "limit-setting rules (RES002, RES003, RES005, RES006). Limits must always be >= requests; "
+    "if a request was raised by one rule, adjust the limit to stay above it.\n"
     "Canonical key guidance for selected rules:\n"
     f"{FULL_FIX_PROMPT_TOKEN_CANONICAL_GUIDANCE}\n"
     f"{FULL_FIX_PROMPT_TOKEN_RETRY_BLOCK}\n"

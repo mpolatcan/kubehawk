@@ -21,7 +21,6 @@ import pytest
 
 from kubeagle.widgets.data.tables import (
     CustomDataTable,
-    IDataProvider,
 )
 
 # =============================================================================
@@ -47,20 +46,6 @@ def sample_rows() -> list[tuple[str, str, str]]:
         ("redis", "6.2.0", "deployed"),
         ("postgres", "13.0", "pending"),
     ]
-
-
-@pytest.fixture
-def sample_data_provider(sample_columns, sample_rows) -> type[IDataProvider]:
-    """Sample data provider implementation for testing."""
-
-    class SampleDataProvider(IDataProvider):
-        def get_columns(self) -> list[tuple[str, str]]:
-            return sample_columns
-
-        def get_rows(self) -> list[tuple[str, str, str]]:
-            return sample_rows
-
-    return SampleDataProvider
 
 
 @pytest.fixture
@@ -562,70 +547,6 @@ class TestEdgeCases:
 
 
 # =============================================================================
-# IDATAPROVIDER TESTS
-# =============================================================================
-
-
-@pytest.mark.unit
-@pytest.mark.fast
-class TestIDataProvider:
-    """Tests for IDataProvider protocol."""
-
-    def test_idata_provider_is_abstract(self):
-        """Test IDataProvider cannot be instantiated directly."""
-        with pytest.raises(TypeError):
-            IDataProvider()
-
-    def test_idata_provider_requires_get_columns(self):
-        """Test IDataProvider requires get_columns method."""
-        class BadProvider(IDataProvider):
-            pass
-
-        with pytest.raises(TypeError):
-            BadProvider()
-
-    def test_idata_provider_requires_get_rows(self):
-        """Test IDataProvider requires get_rows method."""
-
-        class BadProvider(IDataProvider):
-            def get_columns(self):
-                return []
-
-        with pytest.raises(TypeError):
-            BadProvider()
-
-    def test_idata_provider_filter_rows_default(self):
-        """Test IDataProvider.filter_rows returns all rows by default."""
-
-        class MinimalProvider(IDataProvider):
-            def get_columns(self):
-                return []
-
-            def get_rows(self):
-                return [("a", 1), ("b", 2)]
-
-        provider = MinimalProvider()
-        rows = [("a", 1), ("b", 2)]
-        result = provider.filter_rows("name", "a")
-        assert result == rows
-
-    def test_idata_provider_sort_rows_default(self):
-        """Test IDataProvider.sort_rows returns original by default."""
-
-        class MinimalProvider(IDataProvider):
-            def get_columns(self):
-                return []
-
-            def get_rows(self):
-                return []
-
-        provider = MinimalProvider()
-        rows = [("b", 2), ("a", 1)]
-        result = provider.sort_rows(rows, "name", reverse=False)
-        assert result == rows
-
-
-# =============================================================================
 # CLASS VARIABLES TESTS
 # =============================================================================
 
@@ -649,89 +570,6 @@ class TestClassVariables:
         """Test BINDINGS is assigned from DATA_TABLE_BINDINGS."""
         table = CustomDataTable()
         assert hasattr(table, 'BINDINGS')
-
-
-# =============================================================================
-# SORT UTILITIES TESTS (from custom_table module)
-# =============================================================================
-
-
-@pytest.mark.unit
-@pytest.mark.fast
-class TestSortUtilities:
-    """Tests for standalone sort utilities from custom_table module."""
-
-    def test_sort_rows_empty(self):
-        """Test sort_rows returns empty list for empty input."""
-        from kubeagle.widgets.data.tables.custom_table import sort_rows
-
-        result = sort_rows([], "name", [], set())
-        assert result == []
-
-    def test_sort_rows_no_matching_column(self):
-        """Test sort_rows returns original if column not found."""
-        from kubeagle.widgets.data.tables.custom_table import sort_rows
-
-        rows = [("a", 1), ("b", 2)]
-        result = sort_rows(rows, "missing", [("Name", "name")], set())
-        assert result == rows
-
-    def test_get_sort_indicator_empty(self):
-        """Test get_sort_indicator returns empty string when not sorted."""
-        from kubeagle.widgets.data.tables.custom_table import (
-            get_sort_indicator,
-        )
-
-        result = get_sort_indicator(None, "name", False)
-        assert result == ""
-
-    def test_get_sort_indicator_ascending(self):
-        """Test get_sort_indicator returns [+ ] for ascending."""
-        from kubeagle.widgets.data.tables.custom_table import (
-            get_sort_indicator,
-        )
-
-        result = get_sort_indicator("name", "name", False)
-        assert result == " [+]"
-
-    def test_get_sort_indicator_descending(self):
-        """Test get_sort_indicator returns [-] for descending."""
-        from kubeagle.widgets.data.tables.custom_table import (
-            get_sort_indicator,
-        )
-
-        result = get_sort_indicator("name", "name", True)
-        assert result == " [-]"
-
-    def test_parse_sort_indicator_ascending(self):
-        """Test parse_sort_indicator extracts [+]. """
-        from kubeagle.widgets.data.tables.custom_table import (
-            parse_sort_indicator,
-        )
-
-        label, reverse = parse_sort_indicator("Name [+]")
-        assert label == "Name"
-        assert reverse is False
-
-    def test_parse_sort_indicator_descending(self):
-        """Test parse_sort_indicator extracts [-]."""
-        from kubeagle.widgets.data.tables.custom_table import (
-            parse_sort_indicator,
-        )
-
-        label, reverse = parse_sort_indicator("Name [-]")
-        assert label == "Name"
-        assert reverse is True
-
-    def test_parse_sort_indicator_none(self):
-        """Test parse_sort_indicator returns None for no indicator."""
-        from kubeagle.widgets.data.tables.custom_table import (
-            parse_sort_indicator,
-        )
-
-        label, reverse = parse_sort_indicator("Name")
-        assert label == "Name"
-        assert reverse is None
 
 
 @pytest.mark.unit

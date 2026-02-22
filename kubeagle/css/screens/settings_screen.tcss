@@ -134,11 +134,22 @@ SettingsScreen {
 }
 
 #general-settings-section {
-    grid-size: 2 7;
-    grid-rows: 3 3 3 3 3 3 3;
+    grid-size: 2 10;
+    grid-rows: 3 3 3 3 3 3 3 3 3 auto;
     height: 1fr;
     overflow-y: auto;
     overflow-x: hidden;
+}
+
+#fixed-fields-grid {
+    column-span: 2;
+    width: 1fr;
+    layout: grid;
+    grid-size: 4 2;
+    grid-columns: auto 1fr auto 1fr;
+    grid-rows: 3 3;
+    grid-gutter: 0 1;
+    padding: 0;
 }
 
 #threshold-settings-section {

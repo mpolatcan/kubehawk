@@ -81,7 +81,21 @@ INPUT_TOOLTIPS: dict[str, str] = {
     "ai-fix-bulk-parallelism-input": (
         "Maximum number of chart bundles generated in parallel during AI bulk fix."
     ),
+    "progressive-parallelism-select": (
+        "Max concurrent namespace fetches during progressive loading."
+    ),
+    "progressive-yield-interval-select": (
+        "Yield to UI event loop every N completions for progressive table display."
+    ),
 }
+
+PROGRESSIVE_OPTIONS: list[tuple[str, str]] = [
+    ("2", "2"),
+    ("4", "4"),
+    ("6", "6"),
+    ("8", "8"),
+]
+PROGRESSIVE_VALUES: set[str] = {v for _, v in PROGRESSIVE_OPTIONS}
 
 AI_FIX_PROVIDER_OPTIONS: list[tuple[str, str]] = [
     ("Codex", "codex"),
@@ -199,6 +213,50 @@ class SettingsScreen(MainNavigationTabsMixin, BaseScreen):
                                 placeholder="30",
                                 id="helm-template-timeout-input",
                                 restrict=r"[0-9]+",
+                            ),
+                            CustomStatic(
+                                "Progressive Parallelism",
+                                classes="setting-label",
+                            ),
+                            Select(
+                                PROGRESSIVE_OPTIONS,
+                                value=str(self._settings.progressive_parallelism),
+                                allow_blank=False,
+                                id="progressive-parallelism-select",
+                            ),
+                            CustomStatic(
+                                "Progressive Yield Interval",
+                                classes="setting-label",
+                            ),
+                            Select(
+                                PROGRESSIVE_OPTIONS,
+                                value=str(self._settings.progressive_yield_interval),
+                                allow_blank=False,
+                                id="progressive-yield-interval-select",
+                            ),
+                            CustomStatic("Fixed Resource Fields", classes="section-header"),
+                            CustomContainer(
+                                CustomStatic("Fix CPU Request", classes="setting-label"),
+                                CustomSwitch(
+                                    value="cpu_request" in self._settings.fixed_resource_fields,
+                                    id="fix-cpu-request-switch",
+                                ),
+                                CustomStatic("Fix CPU Limit", classes="setting-label"),
+                                CustomSwitch(
+                                    value="cpu_limit" in self._settings.fixed_resource_fields,
+                                    id="fix-cpu-limit-switch",
+                                ),
+                                CustomStatic("Fix Memory Request", classes="setting-label"),
+                                CustomSwitch(
+                                    value="memory_request" in self._settings.fixed_resource_fields,
+                                    id="fix-memory-request-switch",
+                                ),
+                                CustomStatic("Fix Memory Limit", classes="setting-label"),
+                                CustomSwitch(
+                                    value="memory_limit" in self._settings.fixed_resource_fields,
+                                    id="fix-memory-limit-switch",
+                                ),
+                                id="fixed-fields-grid",
                             ),
                             classes="section-group",
                             id="general-settings-section",
@@ -581,6 +639,12 @@ class SettingsScreen(MainNavigationTabsMixin, BaseScreen):
         self.query_one("#auto-refresh-switch", CustomSwitch).value = (
             settings.auto_refresh
         )
+        with suppress(Exception):
+            fixed = settings.fixed_resource_fields
+            self.query_one("#fix-cpu-request-switch", CustomSwitch).value = "cpu_request" in fixed
+            self.query_one("#fix-cpu-limit-switch", CustomSwitch).value = "cpu_limit" in fixed
+            self.query_one("#fix-memory-request-switch", CustomSwitch).value = "memory_request" in fixed
+            self.query_one("#fix-memory-limit-switch", CustomSwitch).value = "memory_limit" in fixed
         self.query_one("#export-path-input", CustomInput).value = (
             settings.export_path
         )
@@ -599,6 +663,14 @@ class SettingsScreen(MainNavigationTabsMixin, BaseScreen):
         self.query_one("#helm-template-timeout-input", CustomInput).value = str(
             settings.helm_template_timeout_seconds
         )
+        with suppress(Exception):
+            select_widget = self.query_one("#progressive-parallelism-select", Select)
+            val = str(settings.progressive_parallelism)
+            select_widget.value = val if val in PROGRESSIVE_VALUES else "2"
+        with suppress(Exception):
+            select_widget = self.query_one("#progressive-yield-interval-select", Select)
+            val = str(settings.progressive_yield_interval)
+            select_widget.value = val if val in PROGRESSIVE_VALUES else "2"
         with suppress(Exception):
             select_widget = self.query_one("#ai-fix-llm-provider-select", Select)
             provider = str(settings.ai_fix_llm_provider or "codex").strip().lower()
@@ -678,6 +750,14 @@ class SettingsScreen(MainNavigationTabsMixin, BaseScreen):
             "ai-fix-bulk-parallelism-input": self._get_input_value(
                 "ai-fix-bulk-parallelism-input"
             ),
+            "progressive-parallelism-select": self._get_select_value(
+                "progressive-parallelism-select",
+                "2",
+            ),
+            "progressive-yield-interval-select": self._get_select_value(
+                "progressive-yield-interval-select",
+                "2",
+            ),
             "ai-fix-full-fix-prompt-input": self.query_one(
                 "#ai-fix-full-fix-prompt-input", CustomTextArea
             ).text,
@@ -688,6 +768,18 @@ class SettingsScreen(MainNavigationTabsMixin, BaseScreen):
         return {
             "auto-refresh-switch": self.query_one(
                 "#auto-refresh-switch", CustomSwitch
+            ).value,
+            "fix-cpu-request-switch": self.query_one(
+                "#fix-cpu-request-switch", CustomSwitch
+            ).value,
+            "fix-cpu-limit-switch": self.query_one(
+                "#fix-cpu-limit-switch", CustomSwitch
+            ).value,
+            "fix-memory-request-switch": self.query_one(
+                "#fix-memory-request-switch", CustomSwitch
+            ).value,
+            "fix-memory-limit-switch": self.query_one(
+                "#fix-memory-limit-switch", CustomSwitch
             ).value,
         }
 
@@ -722,6 +814,8 @@ class SettingsScreen(MainNavigationTabsMixin, BaseScreen):
             "codex model": "ai-fix-codex-model-select",
             "claude model": "ai-fix-claude-model-select",
             "bulk parallelism": "ai-fix-bulk-parallelism-input",
+            "progressive parallelism": "progressive-parallelism-select",
+            "progressive yield": "progressive-yield-interval-select",
             "ai fix system prompt": "ai-fix-full-fix-prompt-input",
             "optimizer system prompt": "ai-fix-full-fix-prompt-input",
         }

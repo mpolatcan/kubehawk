@@ -1254,6 +1254,16 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
             context=context,
             codeowners_path=codeowners_path,
             active_charts_path=active_charts_path,
+            progressive_yield_interval=getattr(
+                getattr(self.app, "settings", None),
+                "progressive_yield_interval",
+                2,
+            ),
+            progressive_parallelism=getattr(
+                getattr(self.app, "settings", None),
+                "progressive_parallelism",
+                2,
+            ),
         )
         self._charts_controller_cache_key = cache_key
         return self._charts_controller
@@ -1535,10 +1545,6 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
                     id=TAB_CHARTS,
                 ),
                 CustomVertical(
-                    ViolationsView(
-                        team_filter=self._optimizer_team_filter,
-                        id="violations-view",
-                    ),
                     id=TAB_VIOLATIONS,
                 ),
                 id="charts-inner-switcher",
@@ -1874,9 +1880,22 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
             timer.stop()
 
     def _ensure_violations_view_initialized(self) -> None:
-        """Initialize the violations view lazily on first use."""
+        """Lazy-mount and initialize the violations view on first use."""
         if self._violations_view_initialized:
             return
+        try:
+            container = self.query_one(f"#{TAB_VIOLATIONS}", CustomVertical)
+        except Exception:
+            return
+        try:
+            container.query_one("#violations-view", ViolationsView)
+        except Exception:
+            container.mount(
+                ViolationsView(
+                    team_filter=self._optimizer_team_filter,
+                    id="violations-view",
+                )
+            )
         with contextlib.suppress(Exception):
             self.query_one("#violations-view", ViolationsView).initialize()
             self._violations_view_initialized = True
@@ -2042,6 +2061,16 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
                 charts_controller = ChartsController(
                     charts_path,
                     codeowners_path=codeowners_path,
+                    progressive_yield_interval=getattr(
+                        getattr(app, "settings", None),
+                        "progressive_yield_interval",
+                        2,
+                    ),
+                    progressive_parallelism=getattr(
+                        getattr(app, "settings", None),
+                        "progressive_parallelism",
+                        2,
+                    ),
                 )
 
                 try:
@@ -2310,6 +2339,14 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
                         duration_ms=(time.time() - start) * 1000,
                         optimizer_generation=optimizer_generation,
                     )
+                )
+            else:
+                # Cluster recommendations were empty or timed out — restore
+                # progress to 100% so the bar does not stay stuck at 85%.
+                self.call_later(
+                    self._update_optimizer_loading_message,
+                    "Ready",
+                    100,
                 )
 
         except asyncio.CancelledError:
@@ -2661,7 +2698,8 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
                         return
                     now = time.monotonic()
                     if (
-                        now - last_partial_publish_monotonic
+                        last_partial_publish_monotonic > 0
+                        and now - last_partial_publish_monotonic
                         < self._CLUSTER_PARTIAL_UPDATE_MIN_INTERVAL_SECONDS
                     ):
                         return
@@ -2743,7 +2781,8 @@ class ChartsExplorerScreen(MainNavigationTabsMixin, BaseScreen):
                         return
                     now = time.monotonic()
                     if (
-                        now - last_partial_publish_monotonic
+                        last_partial_publish_monotonic > 0
+                        and now - last_partial_publish_monotonic
                         < self._CLUSTER_PARTIAL_UPDATE_MIN_INTERVAL_SECONDS
                     ):
                         return

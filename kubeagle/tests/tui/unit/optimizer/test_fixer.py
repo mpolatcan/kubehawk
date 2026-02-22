@@ -96,10 +96,10 @@ class TestFixGenerator:
         assert "cpu" in fix["resources"]["limits"]
         assert "memory" in fix["resources"]["limits"]
 
-    def test_generate_fix_res005_uses_safer_burstable_ratio(
+    def test_generate_fix_res005_increases_request_with_burstable_ratio(
         self, generator: FixGenerator
     ) -> None:
-        """RES005 auto-fix should target ~1.5x request instead of 2x."""
+        """RES005 always increases request (limit / 1.5) — never decreases limit."""
         violation = pytest.importorskip(
             "kubeagle.optimizer.rules"
         ).OptimizationViolation(
@@ -111,17 +111,17 @@ class TestFixGenerator:
             fix_preview={},
             auto_fixable=True,
         )
-        chart_data = {"resources": {"requests": {"cpu": "100m"}}}
+        chart_data = {"resources": {"requests": {"cpu": "100m"}, "limits": {"cpu": "300m"}}}
 
         fix = generator.generate_fix(violation, chart_data)
 
         assert fix is not None
-        assert fix["resources"]["limits"]["cpu"] == "150m"
+        assert fix["resources"]["requests"]["cpu"] == "200m"
 
-    def test_generate_fix_res006_uses_safer_burstable_ratio(
+    def test_generate_fix_res006_increases_request_with_burstable_ratio(
         self, generator: FixGenerator
     ) -> None:
-        """RES006 auto-fix should target ~1.5x request instead of 2x."""
+        """RES006 always increases request (limit / 1.5) — never decreases limit."""
         violation = pytest.importorskip(
             "kubeagle.optimizer.rules"
         ).OptimizationViolation(
@@ -133,17 +133,17 @@ class TestFixGenerator:
             fix_preview={},
             auto_fixable=True,
         )
-        chart_data = {"resources": {"requests": {"memory": "128Mi"}}}
+        chart_data = {"resources": {"requests": {"memory": "128Mi"}, "limits": {"memory": "512Mi"}}}
 
         fix = generator.generate_fix(violation, chart_data)
 
         assert fix is not None
-        assert fix["resources"]["limits"]["memory"] == "192Mi"
+        assert fix["resources"]["requests"]["memory"] == "341Mi"
 
     def test_generate_fix_res005_burstable_2x_strategy(
         self, generator: FixGenerator
     ) -> None:
-        """RES005 should honor explicit Burstable 2.0x strategy."""
+        """RES005 should honor Burstable 2.0x strategy (limit / 2.0)."""
         violation = pytest.importorskip(
             "kubeagle.optimizer.rules"
         ).OptimizationViolation(
@@ -155,7 +155,7 @@ class TestFixGenerator:
             fix_preview={},
             auto_fixable=True,
         )
-        chart_data = {"resources": {"requests": {"cpu": "100m"}}}
+        chart_data = {"resources": {"requests": {"cpu": "100m"}, "limits": {"cpu": "400m"}}}
 
         fix = generator.generate_fix(
             violation,
@@ -164,12 +164,12 @@ class TestFixGenerator:
         )
 
         assert fix is not None
-        assert fix["resources"]["limits"]["cpu"] == "200m"
+        assert fix["resources"]["requests"]["cpu"] == "200m"
 
     def test_generate_fix_res006_guaranteed_strategy(
         self, generator: FixGenerator
     ) -> None:
-        """RES006 should honor Guaranteed strategy (req = limit)."""
+        """RES006 Guaranteed strategy sets request = limit."""
         violation = pytest.importorskip(
             "kubeagle.optimizer.rules"
         ).OptimizationViolation(
@@ -181,7 +181,7 @@ class TestFixGenerator:
             fix_preview={},
             auto_fixable=True,
         )
-        chart_data = {"resources": {"requests": {"memory": "128Mi"}}}
+        chart_data = {"resources": {"requests": {"memory": "128Mi"}, "limits": {"memory": "512Mi"}}}
 
         fix = generator.generate_fix(
             violation,
@@ -190,12 +190,12 @@ class TestFixGenerator:
         )
 
         assert fix is not None
-        assert fix["resources"]["limits"]["memory"] == "128Mi"
+        assert fix["resources"]["requests"]["memory"] == "512Mi"
 
-    def test_generate_fix_res005_target_request(
+    def test_generate_fix_res005_preserves_limit(
         self, generator: FixGenerator
     ) -> None:
-        """RES005 should support fixing request from current limit."""
+        """RES005 should increase request from current limit, preserving limit."""
         violation = pytest.importorskip(
             "kubeagle.optimizer.rules"
         ).OptimizationViolation(
@@ -213,10 +213,10 @@ class TestFixGenerator:
             violation,
             chart_data,
             ratio_strategy="burstable_1_5",
-            ratio_target="request",
         )
 
         assert fix is not None
+        assert "limits" not in fix["resources"]
         assert fix["resources"]["requests"]["cpu"] == "200m"
 
     def test_generate_fix_res006_target_request_guaranteed(
@@ -245,7 +245,6 @@ class TestFixGenerator:
             violation,
             chart_data,
             ratio_strategy="guaranteed",
-            ratio_target="request",
         )
 
         assert fix is not None

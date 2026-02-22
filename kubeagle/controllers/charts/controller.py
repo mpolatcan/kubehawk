@@ -47,6 +47,8 @@ class ChartsController(BaseController):
         codeowners_path: Path | None = None,
         active_charts_path: Path | None = None,
         cache: DataCache | None = None,
+        progressive_yield_interval: int = 2,
+        progressive_parallelism: int = 2,
     ):
         """Initialize the charts controller.
 
@@ -57,9 +59,13 @@ class ChartsController(BaseController):
             codeowners_path: Optional path to CODEOWNERS file
             active_charts_path: Optional path to active charts file
             cache: Optional external cache for coordinated invalidation
+            progressive_yield_interval: Yield to event loop every N completions
+            progressive_parallelism: Max concurrent namespace fetches
         """
         super().__init__()
         self._repo_path = repo_path
+        self._progressive_yield_interval = max(1, progressive_yield_interval)
+        self._progressive_parallelism = max(1, progressive_parallelism)
         self._codeowners_path = codeowners_path
         self._active_charts_path = active_charts_path
         self.max_workers = max_workers
@@ -383,6 +389,11 @@ class ChartsController(BaseController):
                                 "Chart analysis progress callback failed",
                                 exc_info=True,
                             )
+
+                    # Yield to event loop periodically so queued callbacks
+                    # (progress updates, partial data messages) get processed.
+                    if completed % self._progressive_yield_interval == 0:
+                        await asyncio.sleep(0)
             finally:
                 for task in tasks:
                     if not task.done():
@@ -444,7 +455,11 @@ class ChartsController(BaseController):
         Reuses ClusterController's namespace streaming path to match Cluster screen
         behavior and enables incremental progress updates in Charts Explorer.
         """
-        cluster_controller = ClusterController(context=self.context)
+        cluster_controller = ClusterController(
+            context=self.context,
+            progressive_yield_interval=self._progressive_yield_interval,
+            progressive_parallelism=self._progressive_parallelism,
+        )
         if on_namespace_update is None:
             releases = await cluster_controller.get_helm_releases()
             return [
@@ -824,6 +839,9 @@ class ChartsController(BaseController):
                                 "Release analysis progress callback failed",
                                 exc_info=True,
                             )
+
+                    if completed % self._progressive_yield_interval == 0:
+                        await asyncio.sleep(0)
 
                 duration_seconds = time.perf_counter() - analysis_started_at
                 logger.debug(

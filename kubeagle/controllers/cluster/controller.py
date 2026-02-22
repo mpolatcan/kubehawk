@@ -236,14 +236,23 @@ class ClusterController(BaseController):
             or "transport is closing" in text
         )
 
-    def __init__(self, context: str | None = None):
+    def __init__(
+        self,
+        context: str | None = None,
+        progressive_yield_interval: int = 2,
+        progressive_parallelism: int = 2,
+    ):
         """Initialize the cluster controller.
 
         Args:
             context: Optional Kubernetes context name.
+            progressive_yield_interval: Yield to event loop every N completions.
+            progressive_parallelism: Max concurrent namespace fetches.
         """
         super().__init__()
         self.context = context
+        self._progressive_yield_interval = max(1, progressive_yield_interval)
+        self._progressive_parallelism = max(1, progressive_parallelism)
 
         # Cache and in-flight dedup avoid repeated expensive kubectl/helm calls
         # when multiple tabs request the same sources concurrently.
@@ -1024,7 +1033,7 @@ class ClusterController(BaseController):
                 self._pods_cache = list(pods)
             return pods
 
-        semaphore = asyncio.Semaphore(self._NAMESPACE_STREAM_MAX_CONCURRENT)
+        semaphore = asyncio.Semaphore(self._progressive_parallelism)
         total = len(namespaces)
         completed = 0
         all_pods: list[dict[str, Any]] = []
@@ -1066,6 +1075,9 @@ class ClusterController(BaseController):
                         )
                         if inspect.isawaitable(callback_result):
                             await callback_result
+
+                if completed % self._progressive_yield_interval == 0:
+                    await asyncio.sleep(0)
         finally:
             for task in tasks:
                 if not task.done():
@@ -1106,7 +1118,7 @@ class ClusterController(BaseController):
             self._warning_events_cache_ready = True
             return events
 
-        semaphore = asyncio.Semaphore(self._NAMESPACE_STREAM_MAX_CONCURRENT)
+        semaphore = asyncio.Semaphore(self._progressive_parallelism)
         total = len(namespaces)
         completed = 0
         all_events: list[dict[str, Any]] = []
@@ -1148,6 +1160,9 @@ class ClusterController(BaseController):
                         )
                         if inspect.isawaitable(callback_result):
                             await callback_result
+
+                if completed % self._progressive_yield_interval == 0:
+                    await asyncio.sleep(0)
         finally:
             for task in tasks:
                 if not task.done():
@@ -1539,7 +1554,7 @@ class ClusterController(BaseController):
         if not namespaces:
             return self._parse_pdb_items(await self._cluster_fetcher.fetch_pdbs())
 
-        semaphore = asyncio.Semaphore(self._NAMESPACE_STREAM_MAX_CONCURRENT)
+        semaphore = asyncio.Semaphore(self._progressive_parallelism)
         total = len(namespaces)
         completed = 0
         all_pdbs: list[PDBInfo] = []
@@ -1584,6 +1599,9 @@ class ClusterController(BaseController):
                         )
                         if inspect.isawaitable(callback_result):
                             await callback_result
+
+                if completed % self._progressive_yield_interval == 0:
+                    await asyncio.sleep(0)
         finally:
             for task in tasks:
                 if not task.done():
@@ -1627,7 +1645,7 @@ class ClusterController(BaseController):
             self._helm_releases_cache = list(releases)
             return releases
 
-        semaphore = asyncio.Semaphore(self._NAMESPACE_STREAM_MAX_CONCURRENT)
+        semaphore = asyncio.Semaphore(self._progressive_parallelism)
         total = len(namespaces)
         completed = 0
         all_releases: list[HelmReleaseInfo] = []
@@ -1668,6 +1686,9 @@ class ClusterController(BaseController):
                         )
                         if inspect.isawaitable(callback_result):
                             await callback_result
+
+                if completed % self._progressive_yield_interval == 0:
+                    await asyncio.sleep(0)
         finally:
             for task in tasks:
                 if not task.done():
@@ -2827,7 +2848,7 @@ class ClusterController(BaseController):
                 key=lambda row: (row.namespace, row.kind, row.name),
             )
 
-        semaphore = asyncio.Semaphore(self._NAMESPACE_STREAM_MAX_CONCURRENT)
+        semaphore = asyncio.Semaphore(self._progressive_parallelism)
         total = len(namespaces)
         completed = 0
         all_rows: list[WorkloadInventoryInfo] = []
@@ -2884,6 +2905,9 @@ class ClusterController(BaseController):
                         )
                         if inspect.isawaitable(callback_result):
                             await callback_result
+
+                if completed % self._progressive_yield_interval == 0:
+                    await asyncio.sleep(0)
         finally:
             for task in tasks:
                 if not task.done():
@@ -2946,7 +2970,7 @@ class ClusterController(BaseController):
                     result.append(row)
             return result
 
-        semaphore = asyncio.Semaphore(self._NAMESPACE_STREAM_MAX_CONCURRENT)
+        semaphore = asyncio.Semaphore(self._progressive_parallelism)
         total = len(namespaces)
         completed = 0
         all_workloads: list[SingleReplicaWorkloadInfo] = []
@@ -3002,6 +3026,9 @@ class ClusterController(BaseController):
                         )
                         if inspect.isawaitable(callback_result):
                             await callback_result
+
+                if completed % self._progressive_yield_interval == 0:
+                    await asyncio.sleep(0)
         finally:
             for task in tasks:
                 if not task.done():

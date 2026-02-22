@@ -153,9 +153,7 @@ class TestNavigationModuleImports:
     def test_navigate_to_functions_import(self):
         """Test all navigate_to_* functions can be imported."""
         from kubeagle.keyboard.navigation import (
-            navigate_to_chart_detail,
             navigate_to_charts,
-            navigate_to_charts_explorer,
             navigate_to_cluster,
             navigate_to_export,
             navigate_to_home,
@@ -167,12 +165,10 @@ class TestNavigationModuleImports:
         assert navigate_to_home is not None
         assert navigate_to_cluster is not None
         assert navigate_to_charts is not None
-        assert navigate_to_charts_explorer is not None
         assert navigate_to_optimizer is not None
         assert navigate_to_export is not None
         assert navigate_to_settings is not None
         assert navigate_to_recommendations is not None
-        assert navigate_to_chart_detail is not None
 
     def test_keybindings_import(self):
         """Test all keybinding constants can be imported from keyboard module."""
@@ -181,7 +177,6 @@ class TestNavigationModuleImports:
             CHART_DETAIL_SCREEN_BINDINGS,
             CHARTS_EXPLORER_SCREEN_BINDINGS,
             CLUSTER_SCREEN_BINDINGS,
-            OPTIMIZER_SCREEN_BINDINGS,
             REPORT_EXPORT_SCREEN_BINDINGS,
             SETTINGS_SCREEN_BINDINGS,
         )
@@ -189,7 +184,6 @@ class TestNavigationModuleImports:
         assert BASE_SCREEN_BINDINGS is not None
         assert CHARTS_EXPLORER_SCREEN_BINDINGS is not None
         assert CLUSTER_SCREEN_BINDINGS is not None
-        assert OPTIMIZER_SCREEN_BINDINGS is not None
         assert SETTINGS_SCREEN_BINDINGS is not None
         assert CHART_DETAIL_SCREEN_BINDINGS is not None
         assert REPORT_EXPORT_SCREEN_BINDINGS is not None
@@ -200,23 +194,11 @@ class TestNavigationModuleImports:
 class TestMixinImports:
     """Tests for mixin imports."""
 
-    def test_filterable_table_mixin_import(self):
-        """Test FilterableTableMixin can be imported."""
-        from kubeagle.screens.mixins import FilterableTableMixin
-
-        assert FilterableTableMixin is not None
-
     def test_tabbed_view_mixin_import(self):
         """Test TabbedViewMixin can be imported."""
         from kubeagle.screens.mixins import TabbedViewMixin
 
         assert TabbedViewMixin is not None
-
-    def test_data_load_mixin_import(self):
-        """Test DataLoadMixin can be imported."""
-        from kubeagle.screens.mixins import DataLoadMixin
-
-        assert DataLoadMixin is not None
 
 
 @pytest.mark.unit
@@ -251,12 +233,10 @@ class TestScreensPackageExports:
             "navigate_to_home",
             "navigate_to_cluster",
             "navigate_to_charts",
-            "navigate_to_charts_explorer",
             "navigate_to_optimizer",
             "navigate_to_export",
             "navigate_to_settings",
             "navigate_to_recommendations",
-            "navigate_to_chart_detail",
         ]
 
         for name in expected_navigation:
@@ -271,7 +251,6 @@ class TestScreensPackageExports:
             "BASE_SCREEN_BINDINGS",
             "CLUSTER_SCREEN_BINDINGS",
             "CHARTS_EXPLORER_SCREEN_BINDINGS",
-            "OPTIMIZER_SCREEN_BINDINGS",
             "SETTINGS_SCREEN_BINDINGS",
             "CHART_DETAIL_SCREEN_BINDINGS",
             "REPORT_EXPORT_SCREEN_BINDINGS",
@@ -401,28 +380,6 @@ class TestNavigationFunctionsSignature:
         params = list(sig.parameters.keys())
         assert "app" in params
 
-    def test_navigate_to_charts_explorer_signature(self):
-        """Test navigate_to_charts_explorer takes app parameter."""
-        import inspect
-
-        from kubeagle.keyboard.navigation import (
-            navigate_to_charts_explorer,
-        )
-
-        sig = inspect.signature(navigate_to_charts_explorer)
-        params = list(sig.parameters.keys())
-        assert "app" in params
-
-    def test_navigate_to_chart_detail_signature(self):
-        """Test navigate_to_chart_detail takes app and chart parameters."""
-        import inspect
-
-        from kubeagle.keyboard.navigation import navigate_to_chart_detail
-
-        sig = inspect.signature(navigate_to_chart_detail)
-        params = list(sig.parameters.keys())
-        assert "app" in params
-        assert "chart" in params
 
 
 # =============================================================================

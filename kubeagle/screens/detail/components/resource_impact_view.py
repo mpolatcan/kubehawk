@@ -25,6 +25,7 @@ from kubeagle.widgets import (
     CustomContainer,
     CustomDataTable,
     CustomHorizontal,
+    CustomKPI,
     CustomLoadingIndicator,
     CustomSelectionList,
     CustomStatic,
@@ -415,6 +416,15 @@ class ResourceImpactView(CustomVertical):
                 "[dim]No charts with resource changes detected.[/dim]",
                 id="impact-chart-empty",
             ),
+            CustomHorizontal(
+                CustomKPI("Charts", "0", id="impact-kpi-s-charts", classes="kpi-inline"),
+                CustomKPI("CPU Req", "0", id="impact-kpi-s-cpu-req", classes="kpi-inline"),
+                CustomKPI("CPU Lim", "0", id="impact-kpi-s-cpu-lim", classes="kpi-inline"),
+                CustomKPI("Mem Req", "0", id="impact-kpi-s-mem-req", classes="kpi-inline"),
+                CustomKPI("Mem Lim", "0", id="impact-kpi-s-mem-lim", classes="kpi-inline"),
+                CustomKPI("Replicas", "0", id="impact-kpi-s-replicas", classes="kpi-inline"),
+                id="impact-summary-bar",
+            ),
             id="impact-chart-section",
             classes="impact-section",
         )
@@ -470,6 +480,7 @@ class ResourceImpactView(CustomVertical):
         self.set_loading(False)
         self._update_metrics(result)
         self._update_chart_table(result)
+        self._update_summary_bar(result)
 
     # ------------------------------------------------------------------
     # Filters (triggered externally via top bar)
@@ -642,12 +653,18 @@ class ResourceImpactView(CustomVertical):
             table = self.query_one("#impact-chart-table", CustomDataTable)
             table.clear()
 
-            before_map = {s.name: s for s in result.before_charts}
-            after_map = {s.name: s for s in result.after_charts}
+            # Use (name, values_file_type) as composite key so each variant
+            # is a separate row in the table.
+            before_map = {
+                (s.name, s.values_file_type): s for s in result.before_charts
+            }
+            after_map = {
+                (s.name, s.values_file_type): s for s in result.after_charts
+            }
 
             has_changes = False
-            for name, after in after_map.items():
-                before = before_map.get(name)
+            for key, after in after_map.items():
+                before = before_map.get(key)
                 if before is None:
                     continue
                 if (
@@ -663,8 +680,9 @@ class ResourceImpactView(CustomVertical):
 
                 has_changes = True
                 table.add_row(
-                    name,
+                    after.name,
                     after.team,
+                    after.values_file_type or "Other",
                     f"{_format_cpu(before.cpu_request_per_replica)} \u2192 {_format_cpu(after.cpu_request_per_replica)}",
                     f"{_format_cpu(before.cpu_limit_per_replica)} \u2192 {_format_cpu(after.cpu_limit_per_replica)}",
                     f"{_format_memory(before.memory_request_per_replica)} \u2192 {_format_memory(after.memory_request_per_replica)}",
@@ -681,3 +699,32 @@ class ResourceImpactView(CustomVertical):
                 self.query_one(
                     "#impact-chart-empty", CustomStatic
                 ).display = not has_changes
+
+    def _update_summary_bar(self, result: ResourceImpactResult) -> None:
+        """Update the summary info bar below the chart table."""
+        b = result.before
+        a = result.after
+        with contextlib.suppress(Exception):
+            self.query_one("#impact-kpi-s-charts", CustomKPI).set_value(
+                str(b.chart_count)
+            )
+        with contextlib.suppress(Exception):
+            self.query_one("#impact-kpi-s-cpu-req", CustomKPI).set_value(
+                f"{_format_cpu(b.cpu_request_total)} \u2192 {_format_cpu(a.cpu_request_total)}"
+            )
+        with contextlib.suppress(Exception):
+            self.query_one("#impact-kpi-s-cpu-lim", CustomKPI).set_value(
+                f"{_format_cpu(b.cpu_limit_total)} \u2192 {_format_cpu(a.cpu_limit_total)}"
+            )
+        with contextlib.suppress(Exception):
+            self.query_one("#impact-kpi-s-mem-req", CustomKPI).set_value(
+                f"{_format_memory(b.memory_request_total)} \u2192 {_format_memory(a.memory_request_total)}"
+            )
+        with contextlib.suppress(Exception):
+            self.query_one("#impact-kpi-s-mem-lim", CustomKPI).set_value(
+                f"{_format_memory(b.memory_limit_total)} \u2192 {_format_memory(a.memory_limit_total)}"
+            )
+        with contextlib.suppress(Exception):
+            self.query_one("#impact-kpi-s-replicas", CustomKPI).set_value(
+                f"{b.total_replicas:,} \u2192 {a.total_replicas:,}"
+            )

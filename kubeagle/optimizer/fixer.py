@@ -35,6 +35,7 @@ class FixGenerator:
         ratio_strategy: str | None = None,
         ratio_target: str | None = None,
         probe_settings: dict[str, Any] | None = None,
+        fixed_resource_fields: set[str] | None = None,
     ) -> dict[str, Any] | None:
         """Generate a fix dictionary for a violation.
 
@@ -44,6 +45,7 @@ class FixGenerator:
             ratio_strategy: Optional ratio strategy for RES005/RES006 fixes.
             ratio_target: Optional ratio fix target (`limit` or `request`).
             probe_settings: Optional probe override settings for PRB rules.
+            fixed_resource_fields: Optional set of fields to protect from modification.
 
         Returns:
             Dictionary with the fix to apply, or None if not fixable
@@ -82,16 +84,14 @@ class FixGenerator:
             }
 
         elif rule_id == "RES005":
-            # High CPU Limit/Request Ratio - strategy + target driven adjustment.
+            # High CPU Limit/Request Ratio — always increase request to bring
+            # ratio in line.  Limits are never decreased.
             resources = self._get_resources(chart_data)
-            requests = resources.get("requests", {})
             limits = resources.get("limits", {})
-            cpu_request = _parse_cpu(requests.get("cpu"))
             cpu_limit = _parse_cpu(limits.get("cpu"))
             multiplier = self._resolve_ratio_multiplier(ratio_strategy)
-            target = self._resolve_ratio_target(ratio_target)
 
-            if target == RATIO_TARGET_REQUEST and cpu_limit:
+            if cpu_limit:
                 if multiplier is None:
                     target_request = cpu_limit
                 else:
@@ -104,30 +104,15 @@ class FixGenerator:
                     }
                 }
 
-            if cpu_request:
-                if multiplier is None:
-                    target_limit = cpu_request
-                else:
-                    target_limit = cpu_request * multiplier
-                return {
-                    "resources": {
-                        "limits": {
-                            "cpu": f"{self._safe_resource_int(target_limit)}m"
-                        }
-                    }
-                }
-
         elif rule_id == "RES006":
-            # High Memory Limit/Request Ratio - strategy + target driven adjustment.
+            # High Memory Limit/Request Ratio — always increase request to
+            # bring ratio in line.  Limits are never decreased.
             resources = self._get_resources(chart_data)
-            requests = resources.get("requests", {})
             limits = resources.get("limits", {})
-            mem_request = _parse_memory(requests.get("memory"))
             mem_limit = _parse_memory(limits.get("memory"))
             multiplier = self._resolve_ratio_multiplier(ratio_strategy)
-            target = self._resolve_ratio_target(ratio_target)
 
-            if target == RATIO_TARGET_REQUEST and mem_limit:
+            if mem_limit:
                 if multiplier is None:
                     target_request = mem_limit
                 else:
@@ -136,19 +121,6 @@ class FixGenerator:
                     "resources": {
                         "requests": {
                             "memory": f"{self._safe_resource_int(target_request)}Mi"
-                        }
-                    }
-                }
-
-            if mem_request:
-                if multiplier is None:
-                    target_limit = mem_request
-                else:
-                    target_limit = mem_request * multiplier
-                return {
-                    "resources": {
-                        "limits": {
-                            "memory": f"{self._safe_resource_int(target_limit)}Mi"
                         }
                     }
                 }
@@ -271,6 +243,50 @@ class FixGenerator:
             return {"podDisruptionBudget": {"maxUnavailable": 1}}
 
         return None
+
+    @staticmethod
+    def strip_fixed_fields(
+        fix: dict[str, Any],
+        fixed_fields: set[str] | None = None,
+        *,
+        exempt_rule_ids: frozenset[str] = frozenset({"RES007", "RES009"}),
+        rule_id: str = "",
+    ) -> dict[str, Any] | None:
+        """Remove resource keys that correspond to fixed fields.
+
+        Returns the (possibly trimmed) fix dict, or None if all resource
+        keys were stripped and nothing else remains.
+        """
+        if not fixed_fields:
+            return fix
+        if rule_id in exempt_rule_ids:
+            return fix
+
+        resources = fix.get("resources")
+        if not isinstance(resources, dict):
+            return fix
+
+        field_to_path: dict[str, tuple[str, str]] = {
+            "cpu_request": ("requests", "cpu"),
+            "cpu_limit": ("limits", "cpu"),
+            "memory_request": ("requests", "memory"),
+            "memory_limit": ("limits", "memory"),
+        }
+
+        for field, (section, key) in field_to_path.items():
+            if field not in fixed_fields:
+                continue
+            sub = resources.get(section)
+            if isinstance(sub, dict) and key in sub:
+                del sub[key]
+                if not sub:
+                    del resources[section]
+
+        if not resources:
+            remaining = {k: v for k, v in fix.items() if k != "resources"}
+            return remaining or None
+
+        return fix
 
     def _get_resources(self, chart_data: dict) -> dict:
         """Get resources dict from chart data."""

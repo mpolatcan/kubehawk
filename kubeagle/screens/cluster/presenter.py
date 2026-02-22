@@ -632,6 +632,16 @@ class ClusterPresenter:
         charts_controller = ChartsController(
             charts_path,
             codeowners_path=codeowners_path,
+            progressive_yield_interval=getattr(
+                getattr(self._screen.app, "settings", None),
+                "progressive_yield_interval",
+                2,
+            ),
+            progressive_parallelism=getattr(
+                getattr(self._screen.app, "settings", None),
+                "progressive_parallelism",
+                2,
+            ),
         )
         charts = await charts_controller.analyze_all_charts_async()
         total_charts = len(charts)
@@ -834,7 +844,19 @@ class ClusterPresenter:
             msg("Connecting to cluster...")
             if force_refresh:
                 ClusterController.clear_global_command_cache(context=context)
-            ctrl = ClusterController(context=context)
+            ctrl = ClusterController(
+                context=context,
+                progressive_yield_interval=getattr(
+                    getattr(self._screen.app, "settings", None),
+                    "progressive_yield_interval",
+                    2,
+                ),
+                progressive_parallelism=getattr(
+                    getattr(self._screen.app, "settings", None),
+                    "progressive_parallelism",
+                    2,
+                ),
+            )
             # Regression guard: explicit default event window contract.
             # ctrl.fetch_events(max_age_hours=self._DEFAULT_EVENT_WINDOW_HOURS)
             # ctrl.get_event_summary(max_age_hours=self._DEFAULT_EVENT_WINDOW_HOURS)

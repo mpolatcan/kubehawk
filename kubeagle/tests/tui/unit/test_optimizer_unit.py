@@ -21,8 +21,17 @@ from kubeagle.optimizer.rules import (
     _check_no_resource_requests,
     _check_running_as_root,
     _check_very_low_memory_request,
+    configure_rule_thresholds,
     get_rule_by_id,
 )
+
+
+@pytest.fixture(autouse=True)
+def _clear_fixed_resource_fields():
+    """Ensure tests run without fixed resource field restrictions."""
+    configure_rule_thresholds(fixed_resource_fields=set())
+    yield
+    configure_rule_thresholds(fixed_resource_fields=set())
 
 
 @pytest.mark.unit
@@ -433,10 +442,15 @@ class TestCheckNoMemoryLimits:
 @pytest.mark.unit
 @pytest.mark.fast
 class TestCheckVeryLowMemoryRequest:
-    """Tests for very low memory request check rule."""
+    """Tests for very low memory request check rule.
 
-    def test_very_low_memory(self):
-        """Test detection of very low memory request."""
+    RES009 only fires when BOTH request AND limit are low.  When only the
+    request is low but the limit is high, RES006 handles it instead to avoid
+    decreasing the limit.
+    """
+
+    def test_very_low_memory_both_low(self):
+        """RES009 fires when both request and limit are below their thresholds."""
         chart = {
             "resources": {
                 "requests": {
@@ -444,8 +458,43 @@ class TestCheckVeryLowMemoryRequest:
                     "cpu": "100m",
                 },
                 "limits": {
-                    "memory": "256Mi",
+                    "memory": "64Mi",  # Below 128Mi bump target → also low
                     "cpu": "500m",
+                },
+            },
+        }
+
+        violations = _check_very_low_memory_request(chart)
+
+        assert len(violations) == 1
+        assert violations[0].rule_id == "RES009"
+
+    def test_very_low_memory_limit_high_skips(self):
+        """RES009 does NOT fire when limit is high (RES006 handles it)."""
+        chart = {
+            "resources": {
+                "requests": {
+                    "memory": "16Mi",  # Below 32Mi threshold
+                    "cpu": "100m",
+                },
+                "limits": {
+                    "memory": "256Mi",  # High limit → RES006 should handle
+                    "cpu": "500m",
+                },
+            },
+        }
+
+        violations = _check_very_low_memory_request(chart)
+
+        assert len(violations) == 0
+
+    def test_very_low_memory_no_limit(self):
+        """RES009 fires when limit is absent (effectively both low)."""
+        chart = {
+            "resources": {
+                "requests": {
+                    "memory": "16Mi",
+                    "cpu": "100m",
                 },
             },
         }
@@ -464,7 +513,7 @@ class TestCheckVeryLowMemoryRequest:
                     "cpu": "100m",
                 },
                 "limits": {
-                    "memory": "256Mi",
+                    "memory": "64Mi",
                     "cpu": "500m",
                 },
             },
@@ -635,7 +684,7 @@ class TestViolationSeverity:
         chart = {
             "resources": {
                 "requests": {"memory": "16Mi", "cpu": "100m"},
-                "limits": {"memory": "256Mi", "cpu": "500m"},
+                "limits": {"memory": "64Mi", "cpu": "500m"},
             }
         }
 

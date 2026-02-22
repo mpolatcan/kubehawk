@@ -61,14 +61,6 @@ SORT_SELECT_OPTIONS: list[tuple[str, str]] = [
     (SORT_RULE, "Rule"),
 ]
 
-# Optimizer view switching
-VIEW_VIOLATIONS: str = "violations"
-VIEW_IMPACT: str = "impact"
-VIEW_OPTIONS: list[tuple[str, str]] = [
-    ("Optimizer", VIEW_VIOLATIONS),
-    ("Impact Analysis", VIEW_IMPACT),
-]
-
 # Impact analysis table columns
 IMPACT_NODE_TABLE_COLUMNS: list[tuple[str, int]] = [
     ("Instance Type", 16),
@@ -87,6 +79,7 @@ IMPACT_NODE_TABLE_COLUMNS: list[tuple[str, int]] = [
 IMPACT_CHART_TABLE_COLUMNS: list[tuple[str, int]] = [
     ("Chart", 22),
     ("Team", 16),
+    ("Values File", 14),
     ("CPU Req B->A", 20),
     ("CPU Lim B->A", 20),
     ("Mem Req B->A", 20),

@@ -2,7 +2,7 @@
 
 Tests all screen-specific bindings from kubeagle.keyboard.navigation
 including BASE_SCREEN_BINDINGS, CLUSTER_SCREEN_BINDINGS,
-CHARTS_EXPLORER_SCREEN_BINDINGS, OPTIMIZER_SCREEN_BINDINGS, SETTINGS_SCREEN_BINDINGS,
+CHARTS_EXPLORER_SCREEN_BINDINGS, SETTINGS_SCREEN_BINDINGS,
 CHART_DETAIL_SCREEN_BINDINGS, and REPORT_EXPORT_SCREEN_BINDINGS.
 
 These tests verify that screen transitions and bindings work correctly.
@@ -16,7 +16,6 @@ from textual.app import App
 from kubeagle.screens import (
     ChartsExplorerScreen,
     ClusterScreen,
-    OptimizerScreen,
     ReportExportScreen,
     SettingsScreen,
     WorkloadsScreen,
@@ -139,14 +138,6 @@ class TestBaseScreenBindings:
             assert clicked is True
             assert isinstance(app.screen, WorkloadsScreen)
             assert app.title == "KubEagle - Workloads"
-
-    @pytest.mark.asyncio
-    async def test_o_does_not_navigate_optimizer(self, app: App) -> None:
-        """Test that 'o' is not bound to optimizer navigation."""
-        async with app.run_test() as pilot:
-            await pilot.press("o")
-            await pilot.pause()
-            assert not isinstance(app.screen, OptimizerScreen)
 
     @pytest.mark.asyncio
     async def test_e_navigates_export(self, app: App) -> None:
@@ -391,170 +382,6 @@ class TestChartsExplorerScreenBindingsTuples:
 
         binding_pairs = [(k, a) for k, a, _ in CHARTS_EXPLORER_SCREEN_BINDINGS]
         assert ("m", "toggle_mode") in binding_pairs
-
-
-# =============================================================================
-# OPTIMIZER SCREEN BINDINGS TESTS
-# =============================================================================
-
-
-class TestOptimizerScreenBindings:
-    """Test OPTIMIZER_SCREEN_BINDINGS from keyboard/navigation.py."""
-
-    @pytest.mark.asyncio
-    async def test_escape_pops_screen(self, app: App) -> None:
-        """Test that escape key pops optimizer screen."""
-        async with app.run_test() as pilot:
-            await app.run_action("nav_optimizer")
-            await pilot.pause()
-            await pilot.press("escape")
-            await pilot.pause()
-            assert isinstance(app.screen, ClusterScreen)
-
-    @pytest.mark.asyncio
-    async def test_r_refreshes(self, app: App) -> None:
-        """Test that 'r' triggers refresh on optimizer screen."""
-        async with app.run_test() as pilot:
-            await app.run_action("nav_optimizer")
-            await pilot.pause()
-            await pilot.press("r")
-            await pilot.pause()
-            assert app is not None
-
-    @pytest.mark.asyncio
-    async def test_h_navigates_home(self, app: App) -> None:
-        """Test that 'h' navigates to home screen."""
-        async with app.run_test() as pilot:
-            await app.run_action("nav_optimizer")
-            await pilot.pause()
-            await pilot.press("h")
-            await pilot.pause()
-            assert isinstance(app.screen, ClusterScreen)
-
-    @pytest.mark.asyncio
-    async def test_focus_search(self, app: App) -> None:
-        """Test that '/' focuses search on optimizer screen."""
-        async with app.run_test() as pilot:
-            await app.run_action("nav_optimizer")
-            await pilot.pause()
-            await pilot.press("/")
-            await pilot.pause()
-            assert app is not None
-
-    @pytest.mark.asyncio
-    async def test_ctrl_c_toggles_category(self, app: App) -> None:
-        """Test that 'Ctrl+c' toggles category filter."""
-        async with app.run_test() as pilot:
-            await app.run_action("nav_optimizer")
-            await pilot.pause()
-            await pilot.press("ctrl+c")
-            await pilot.pause()
-            assert app is not None
-
-    @pytest.mark.asyncio
-    async def test_ctrl_s_toggles_severity(self, app: App) -> None:
-        """Test that 'Ctrl+s' toggles severity filter."""
-        async with app.run_test() as pilot:
-            await app.run_action("nav_optimizer")
-            await pilot.pause()
-            await pilot.press("ctrl+s")
-            await pilot.pause()
-            assert app is not None
-
-
-class TestOptimizerScreenBindingsTupleVerification:
-    """Verify OPTIMIZER_SCREEN_BINDINGS tuples contain expected key-action pairs."""
-
-    def test_question_mark_show_help(self) -> None:
-        """Test '?' -> show_help exists in OPTIMIZER_SCREEN_BINDINGS."""
-        from kubeagle.keyboard.navigation import OPTIMIZER_SCREEN_BINDINGS
-
-        binding_pairs = [(k, a) for k, a, _ in OPTIMIZER_SCREEN_BINDINGS]
-        assert ("?", "show_help") in binding_pairs
-
-    def test_a_apply_all(self) -> None:
-        """Test 'a' -> apply_all exists in OPTIMIZER_SCREEN_BINDINGS."""
-        from kubeagle.keyboard.navigation import OPTIMIZER_SCREEN_BINDINGS
-
-        binding_pairs = [(k, a) for k, a, _ in OPTIMIZER_SCREEN_BINDINGS]
-        assert ("a", "apply_all") in binding_pairs
-
-    def test_f_fix_violation(self) -> None:
-        """Test 'f' -> fix_violation exists in OPTIMIZER_SCREEN_BINDINGS."""
-        from kubeagle.keyboard.navigation import OPTIMIZER_SCREEN_BINDINGS
-
-        binding_pairs = [(k, a) for k, a, _ in OPTIMIZER_SCREEN_BINDINGS]
-        assert ("f", "fix_violation") in binding_pairs
-
-    def test_p_preview_fix(self) -> None:
-        """Test 'p' -> preview_fix exists in OPTIMIZER_SCREEN_BINDINGS."""
-        from kubeagle.keyboard.navigation import OPTIMIZER_SCREEN_BINDINGS
-
-        binding_pairs = [(k, a) for k, a, _ in OPTIMIZER_SCREEN_BINDINGS]
-        assert ("p", "preview_fix") in binding_pairs
-
-    def test_shift_c_nav_charts(self) -> None:
-        """Test 'C' -> nav_charts exists in OPTIMIZER_SCREEN_BINDINGS."""
-        from kubeagle.keyboard.navigation import OPTIMIZER_SCREEN_BINDINGS
-
-        binding_pairs = [(k, a) for k, a, _ in OPTIMIZER_SCREEN_BINDINGS]
-        assert ("C", "nav_charts") in binding_pairs
-
-    def test_e_nav_export(self) -> None:
-        """Test 'e' -> nav_export exists in OPTIMIZER_SCREEN_BINDINGS."""
-        from kubeagle.keyboard.navigation import OPTIMIZER_SCREEN_BINDINGS
-
-        binding_pairs = [(k, a) for k, a, _ in OPTIMIZER_SCREEN_BINDINGS]
-        assert ("e", "nav_export") in binding_pairs
-
-    def test_1_view_violations(self) -> None:
-        """Test '1' -> view_violations exists in OPTIMIZER_SCREEN_BINDINGS."""
-        from kubeagle.keyboard.navigation import OPTIMIZER_SCREEN_BINDINGS
-
-        binding_pairs = [(k, a) for k, a, _ in OPTIMIZER_SCREEN_BINDINGS]
-        assert ("1", "view_violations") in binding_pairs
-
-    def test_2_view_recommendations(self) -> None:
-        """Test '2' -> view_recommendations exists in OPTIMIZER_SCREEN_BINDINGS."""
-        from kubeagle.keyboard.navigation import OPTIMIZER_SCREEN_BINDINGS
-
-        binding_pairs = [(k, a) for k, a, _ in OPTIMIZER_SCREEN_BINDINGS]
-        assert ("2", "view_recommendations") in binding_pairs
-
-    def test_y_copy_yaml(self) -> None:
-        """Test 'y' -> copy_yaml exists in OPTIMIZER_SCREEN_BINDINGS."""
-        from kubeagle.keyboard.navigation import OPTIMIZER_SCREEN_BINDINGS
-
-        binding_pairs = [(k, a) for k, a, _ in OPTIMIZER_SCREEN_BINDINGS]
-        assert ("y", "copy_yaml") in binding_pairs
-
-    def test_s_focus_sort(self) -> None:
-        """Test 'S' -> focus_sort exists in OPTIMIZER_SCREEN_BINDINGS."""
-        from kubeagle.keyboard.navigation import OPTIMIZER_SCREEN_BINDINGS
-
-        binding_pairs = [(k, a) for k, a, _ in OPTIMIZER_SCREEN_BINDINGS]
-        assert ("S", "focus_sort") in binding_pairs
-
-    def test_v_cycle_severity(self) -> None:
-        """Test 'v' -> cycle_severity exists in OPTIMIZER_SCREEN_BINDINGS."""
-        from kubeagle.keyboard.navigation import OPTIMIZER_SCREEN_BINDINGS
-
-        binding_pairs = [(k, a) for k, a, _ in OPTIMIZER_SCREEN_BINDINGS]
-        assert ("v", "cycle_severity") in binding_pairs
-
-    def test_g_go_to_chart(self) -> None:
-        """Test 'g' -> go_to_chart exists in OPTIMIZER_SCREEN_BINDINGS."""
-        from kubeagle.keyboard.navigation import OPTIMIZER_SCREEN_BINDINGS
-
-        binding_pairs = [(k, a) for k, a, _ in OPTIMIZER_SCREEN_BINDINGS]
-        assert ("g", "go_to_chart") in binding_pairs
-
-    def test_ctrl_s_nav_settings(self) -> None:
-        """Test 'ctrl+s' -> nav_settings exists in OPTIMIZER_SCREEN_BINDINGS."""
-        from kubeagle.keyboard.navigation import OPTIMIZER_SCREEN_BINDINGS
-
-        binding_pairs = [(k, a) for k, a, _ in OPTIMIZER_SCREEN_BINDINGS]
-        assert ("ctrl+s", "nav_settings") in binding_pairs
 
 
 # =============================================================================
@@ -834,12 +661,6 @@ class TestNavigationBindingCounts:
         from kubeagle.keyboard.navigation import CLUSTER_SCREEN_BINDINGS
 
         assert len(CLUSTER_SCREEN_BINDINGS) == 8
-
-    def test_optimizer_screen_bindings_count(self) -> None:
-        """Test OPTIMIZER_SCREEN_BINDINGS has expected count."""
-        from kubeagle.keyboard.navigation import OPTIMIZER_SCREEN_BINDINGS
-
-        assert len(OPTIMIZER_SCREEN_BINDINGS) == 18
 
     def test_settings_screen_bindings_count(self) -> None:
         """Test SETTINGS_SCREEN_BINDINGS has expected count."""

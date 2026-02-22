@@ -1,6 +1,6 @@
 """Tests for base widget classes (_base.py).
 
-Covers BaseWidget, StatefulWidget, and CompositeWidget class
+Covers BaseWidget and StatefulWidget class
 attributes, methods, CSS utilities, reactive state, and ID generation.
 """
 
@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from kubeagle.widgets._base import (
     BaseWidget,
-    CompositeWidget,
     StatefulWidget,
 )
 
@@ -227,27 +226,3 @@ class TestStatefulWidget:
         assert len(widget._state) == 0
 
 
-# ===========================================================================
-# TestCompositeWidget
-# ===========================================================================
-
-
-class TestCompositeWidget:
-    """Tests for CompositeWidget class."""
-
-    def test_composite_widget_exists(self) -> None:
-        """CompositeWidget should be importable and instantiable."""
-        widget = CompositeWidget()
-        assert widget is not None
-
-    def test_composite_widget_is_base_widget(self) -> None:
-        """CompositeWidget should be a subclass of BaseWidget."""
-        assert issubclass(CompositeWidget, BaseWidget)
-
-    def test_composite_widget_inherits_css_methods(self) -> None:
-        """CompositeWidget should inherit add_css_class, remove_css_class, etc."""
-        widget = CompositeWidget()
-        assert hasattr(widget, "add_css_class")
-        assert hasattr(widget, "remove_css_class")
-        assert hasattr(widget, "has_css_class")
-        assert hasattr(widget, "compose_classes")

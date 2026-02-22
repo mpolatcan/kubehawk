@@ -51,6 +51,14 @@ class AppSettings(BaseModel):
     ai_fix_full_fix_system_prompt: str = ""
     ai_fix_bulk_parallelism: int = 2
 
+    # Progressive loading
+    progressive_parallelism: int = 2
+    progressive_yield_interval: int = 2
+
+    # Fixed resource fields - fields protected from optimizer modifications
+    # Valid values: "cpu_request", "cpu_limit", "memory_request", "memory_limit"
+    fixed_resource_fields: list[str] = ["cpu_limit", "memory_limit"]
+
 
 class ConfigError(Exception):
     """Base exception for configuration errors."""

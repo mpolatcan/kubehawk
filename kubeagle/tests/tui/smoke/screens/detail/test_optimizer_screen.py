@@ -2,7 +2,7 @@
 
 This module tests:
 - Screen class attributes and properties
-- Widget composition verification (ViolationsView, RecommendationsView, view-select)
+- Widget composition verification (ViolationsView, RecommendationsView, impact-analysis-btn)
 - Keybinding verification
 - Loading state management
 - View switching
@@ -14,8 +14,6 @@ Note: Tests using app.run_test() are kept minimal due to Textual testing overhea
 """
 
 from __future__ import annotations
-
-from textual.widgets import Select
 
 from kubeagle.screens.detail import OptimizerScreen
 from kubeagle.screens.detail.components import (
@@ -43,7 +41,11 @@ class TestOptimizerScreenWidgetComposition:
     def test_screen_has_css_path(self) -> None:
         """Test that OptimizerScreen has CSS_PATH."""
         assert hasattr(OptimizerScreen, "CSS_PATH")
-        assert "optimizer" in OptimizerScreen.CSS_PATH.lower()
+        css_paths = OptimizerScreen.CSS_PATH
+        if isinstance(css_paths, str):
+            assert "optimizer" in css_paths.lower()
+        else:
+            assert any("optimizer" in str(p).lower() for p in css_paths)
 
     def test_screen_can_be_instantiated(self) -> None:
         """Test that OptimizerScreen can be created."""
@@ -101,81 +103,61 @@ class TestOptimizerScreenCompose:
                 )
         return result
 
-    def test_compose_includes_violations_view(self) -> None:
-        """Test that compose yields a ViolationsView with id='violations-view'."""
+    def test_compose_has_lazy_violations_container(self) -> None:
+        """Test that compose yields an empty container for lazy-mounted ViolationsView."""
         screen = OptimizerScreen(testing=True)
         widgets = list(screen.compose())
         all_widgets = self._flatten(widgets)
-        matches = [
-            w
-            for w in all_widgets
-            if isinstance(w, ViolationsView) and w.id == "violations-view"
+        containers = [
+            w for w in all_widgets if getattr(w, "id", None) == "tab-violations"
         ]
-        assert len(matches) == 1
+        assert len(containers) == 1
+        # ViolationsView is NOT eagerly composed - it's lazy-mounted on first use
+        vv_matches = [w for w in all_widgets if isinstance(w, ViolationsView)]
+        assert len(vv_matches) == 0
 
-    def test_compose_includes_recommendations_view(self) -> None:
-        """Test that compose yields a RecommendationsView with id='recommendations-view'."""
-        screen = OptimizerScreen(testing=True)
-        widgets = list(screen.compose())
-        all_widgets = self._flatten(widgets)
+    def test_violations_view_compose_includes_recommendations(self) -> None:
+        """Test that ViolationsView compose yields a RecommendationsView with id='recommendations-view'."""
+        vv = ViolationsView(id="violations-view")
+        inner_widgets = self._flatten(list(vv.compose()))
         matches = [
             w
-            for w in all_widgets
+            for w in inner_widgets
             if isinstance(w, RecommendationsView)
             and w.id == "recommendations-view"
         ]
         assert len(matches) == 1
 
-    def test_compose_includes_view_select(self) -> None:
-        """Test that violations view composes a Select widget with id='view-select'."""
-        screen = OptimizerScreen(testing=True)
-        widgets = list(screen.compose())
-        violations_views = [
-            w
-            for w in widgets
-            if isinstance(w, ViolationsView) and w.id == "violations-view"
-        ]
-        assert len(violations_views) == 1
+    def test_compose_includes_impact_analysis_button(self) -> None:
+        """Test that violations view composes an Impact Analysis button."""
+        from kubeagle.widgets import CustomButton
 
-        all_widgets = self._flatten(list(violations_views[0].compose()))
-        selects = [
+        vv = ViolationsView(id="violations-view")
+        all_widgets = self._flatten(list(vv.compose()))
+        buttons = [
             w
             for w in all_widgets
-            if isinstance(w, Select) and w.id == "view-select"
+            if isinstance(w, CustomButton) and w.id == "impact-analysis-btn"
         ]
-        assert len(selects) == 1
+        assert len(buttons) == 1
 
-    def test_view_select_has_view_bar_parent(self) -> None:
-        """Test that view-select is inside a view-bar container."""
-        from kubeagle.widgets import CustomHorizontal
-        screen = OptimizerScreen(testing=True)
-        widgets = list(screen.compose())
-        view_bars = [w for w in widgets if isinstance(w, CustomHorizontal) and w.id == "view-bar"]
-        assert len(view_bars) == 1
+    def test_impact_analysis_button_in_action_bar(self) -> None:
+        """Test that impact-analysis-btn is inside the action bar."""
+        from kubeagle.widgets import CustomButton, CustomHorizontal
 
-    def test_compose_does_not_include_old_category_select(self) -> None:
-        """Test that old category-select widget is not in top-level compose."""
-        screen = OptimizerScreen(testing=True)
-        widgets = list(screen.compose())
-        all_widgets = self._flatten(widgets)
-        selects = [
-            w
-            for w in all_widgets
-            if isinstance(w, Select) and w.id == "category-select"
+        vv = ViolationsView(id="violations-view")
+        all_widgets = self._flatten(list(vv.compose()))
+        action_bars = [
+            w for w in all_widgets
+            if isinstance(w, CustomHorizontal) and w.id == "action-bar"
         ]
-        assert len(selects) == 0
-
-    def test_compose_does_not_include_old_severity_select(self) -> None:
-        """Test that old severity-select widget is not in top-level compose."""
-        screen = OptimizerScreen(testing=True)
-        widgets = list(screen.compose())
-        all_widgets = self._flatten(widgets)
-        selects = [
-            w
-            for w in all_widgets
-            if isinstance(w, Select) and w.id == "severity-select"
+        assert len(action_bars) == 1
+        action_bar_children = self._flatten(list(action_bars[0]._pending_children))
+        impact_btns = [
+            w for w in action_bar_children
+            if isinstance(w, CustomButton) and w.id == "impact-analysis-btn"
         ]
-        assert len(selects) == 0
+        assert len(impact_btns) == 1
 
     def test_violations_view_configures_header_tooltips(self) -> None:
         """ViolationsView should wire header tooltips for its table columns."""
@@ -240,8 +222,8 @@ class TestOptimizerScreenKeybindings:
         help_bindings = [b for b in bindings if b[0] == "?"]
         assert len(help_bindings) > 0
 
-    def test_has_apply_all_binding(self) -> None:
-        """Test that 'a' apply all binding exists."""
+    def test_has_toggle_active_binding(self) -> None:
+        """Test that 'a' toggle active filter binding exists."""
         bindings = OptimizerScreen.BINDINGS
         apply_bindings = [b for b in bindings if b[0] == "a"]
         assert len(apply_bindings) > 0
@@ -258,10 +240,10 @@ class TestOptimizerScreenKeybindings:
         preview_bindings = [b for b in bindings if b[0] == "p"]
         assert len(preview_bindings) > 0
 
-    def test_has_charts_binding(self) -> None:
-        """Test that 'C' charts binding exists."""
+    def test_has_cluster_binding(self) -> None:
+        """Test that 'c' cluster binding exists."""
         bindings = OptimizerScreen.BINDINGS
-        charts_bindings = [b for b in bindings if b[0] == "C"]
+        charts_bindings = [b for b in bindings if b[0] == "c"]
         assert len(charts_bindings) > 0
 
     def test_has_export_binding(self) -> None:
@@ -270,14 +252,14 @@ class TestOptimizerScreenKeybindings:
         export_bindings = [b for b in bindings if b[0] == "e"]
         assert len(export_bindings) > 0
 
-    def test_has_view_violations_binding(self) -> None:
-        """Test that '1' view violations binding exists."""
+    def test_has_view_all_binding(self) -> None:
+        """Test that '1' view all binding exists."""
         bindings = OptimizerScreen.BINDINGS
         matches = [b for b in bindings if b[0] == "1"]
         assert len(matches) > 0
 
-    def test_has_view_recommendations_binding(self) -> None:
-        """Test that '2' view recommendations binding exists."""
+    def test_has_view_extreme_binding(self) -> None:
+        """Test that '2' view extreme binding exists."""
         bindings = OptimizerScreen.BINDINGS
         matches = [b for b in bindings if b[0] == "2"]
         assert len(matches) > 0
@@ -288,14 +270,8 @@ class TestOptimizerScreenKeybindings:
         matches = [b for b in bindings if b[0] == "y"]
         assert len(matches) > 0
 
-    def test_has_focus_sort_binding(self) -> None:
-        """Test that 'S' focus sort binding exists."""
-        bindings = OptimizerScreen.BINDINGS
-        matches = [b for b in bindings if b[0] == "S"]
-        assert len(matches) > 0
-
-    def test_has_focus_sort_lowercase_binding(self) -> None:
-        """Test that 's' focus sort binding exists."""
+    def test_has_toggle_sort_direction_binding(self) -> None:
+        """Test that 's' toggle sort direction binding exists."""
         bindings = OptimizerScreen.BINDINGS
         matches = [b for b in bindings if b[0] == "s"]
         assert len(matches) > 0
@@ -398,12 +374,6 @@ class TestOptimizerScreenMessageHandlers:
 class TestOptimizerScreenViewSwitching:
     """Test OptimizerScreen view switching logic."""
 
-    def test_has_switch_view_method(self) -> None:
-        """Test that _switch_view method exists."""
-        screen = OptimizerScreen(testing=True)
-        assert hasattr(screen, "_switch_view")
-        assert callable(screen._switch_view)
-
     def test_has_action_view_violations(self) -> None:
         """Test that action_view_violations method exists."""
         screen = OptimizerScreen(testing=True)
@@ -416,11 +386,6 @@ class TestOptimizerScreenViewSwitching:
         assert hasattr(screen, "action_view_recommendations")
         assert callable(screen.action_view_recommendations)
 
-    def test_has_on_select_changed_handler(self) -> None:
-        """Test that on_select_changed method exists."""
-        screen = OptimizerScreen(testing=True)
-        assert hasattr(screen, "on_select_changed")
-        assert callable(screen.on_select_changed)
 
 
 # =============================================================================
@@ -544,11 +509,6 @@ class TestOptimizerScreenRemovedFeatures:
         screen = OptimizerScreen(testing=True)
         assert not hasattr(screen, "violations")
 
-    def test_no_charts_property(self) -> None:
-        """Test that charts property is NOT on screen (moved to ViolationsView)."""
-        screen = OptimizerScreen(testing=True)
-        assert not hasattr(screen, "charts")
-
     def test_no_sorted_violations_property(self) -> None:
         """Test that sorted_violations is NOT on screen (moved to ViolationsView)."""
         screen = OptimizerScreen(testing=True)
@@ -592,23 +552,11 @@ class TestOptimizerScreenRemovedFeatures:
 class TestOptimizerScreenWorkerMixin:
     """Test OptimizerScreen worker mixin integration."""
 
-    def test_inherits_worker_mixin(self) -> None:
-        """Test that OptimizerScreen inherits from WorkerMixin."""
+    def test_has_start_load_worker(self) -> None:
+        """Test that _start_load_worker method exists."""
         screen = OptimizerScreen(testing=True)
-        assert hasattr(screen, "start_worker")
         assert hasattr(screen, "_start_load_worker")
-
-    def test_has_load_data_worker(self) -> None:
-        """Test that _load_data_worker method exists."""
-        screen = OptimizerScreen(testing=True)
-        assert hasattr(screen, "_load_data_worker")
-        assert callable(screen._load_data_worker)
-
-    def test_has_optimizer_reset_and_reload(self) -> None:
-        """Test that _optimizer_reset_and_reload method exists."""
-        screen = OptimizerScreen(testing=True)
-        assert hasattr(screen, "_optimizer_reset_and_reload")
-        assert callable(screen._optimizer_reset_and_reload)
+        assert callable(screen._start_load_worker)
 
 
 # =============================================================================

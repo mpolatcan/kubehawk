@@ -183,6 +183,12 @@ def test_detect_llm_cli_capabilities_includes_agent_sdk(monkeypatch) -> None:
 
 def test_claude_agent_sdk_available_false_when_not_installed(monkeypatch) -> None:
     """_claude_agent_sdk_available should return False when package is not importable."""
+    import kubeagle.optimizer.llm_cli_runner as _runner_mod
+
+    # Reset the module-level cache so the function re-probes the import
+    monkeypatch.setattr(_runner_mod, "_CLAUDE_SDK_CHECKED", False)
+    monkeypatch.setattr(_runner_mod, "_CLAUDE_SDK_OK", False)
+
     original_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
 
     def _mock_import(name, *args, **kwargs):

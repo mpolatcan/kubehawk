@@ -77,8 +77,8 @@ OptimizerScreen {
     height: auto;
     min-height: 6;
     layout: grid;
-    grid-size: 4 1;
-    grid-columns: 38fr 30fr 25fr 20fr;
+    grid-size: 3 1;
+    grid-columns: 38fr 30fr 25fr;
     grid-gutter: 1 0;
     content-align: left top;
     overflow-x: hidden;
@@ -117,12 +117,6 @@ OptimizerScreen {
     min-height: 3;
     content-align: left top;
     padding: 0;
-}
-
-#view-group {
-    width: 1fr;
-    min-width: 0;
-    max-width: 100%;
 }
 
 #search-group {
@@ -176,11 +170,6 @@ OptimizerScreen {
     min-width: 0;
 }
 
-#filter-row #view-group.optimizer-filter-group {
-    width: 1fr;
-    min-width: 0;
-}
-
 #filter-row #search-group.optimizer-filter-group {
     width: 1fr;
     min-width: 0;
@@ -193,7 +182,6 @@ OptimizerScreen {
     max-width: 100%;
 }
 
-#filter-row #view-group .optimizer-filter-group-body,
 #filter-row #search-group .optimizer-filter-group-body {
     width: 1fr;
     min-width: 0;
@@ -257,11 +245,6 @@ OptimizerScreen {
     width: 1fr;
     min-width: 0;
     max-width: 100%;
-}
-
-#filter-bar #view-select > SelectCurrent {
-    content-align: center middle;
-    text-align: center;
 }
 
 #filter-bar Select.filter-select > SelectCurrent {
@@ -328,8 +311,8 @@ OptimizerScreen {
 /* --- Breakpoints: violations filter controls --- */
 #filter-bar.ultra #filter-row {
     layout: grid;
-    grid-size: 4 1;
-    grid-columns: 38fr 30fr 25fr 20fr;
+    grid-size: 3 1;
+    grid-columns: 38fr 30fr 25fr;
     grid-gutter: 2 0;
     min-height: 6;
 }
@@ -350,8 +333,8 @@ OptimizerScreen {
 
 #filter-bar.wide #filter-row {
     layout: grid;
-    grid-size: 4 1;
-    grid-columns: 38fr 30fr 25fr 20fr;
+    grid-size: 3 1;
+    grid-columns: 38fr 30fr 25fr;
     grid-gutter: 1 0;
     min-height: 6;
 }
@@ -393,8 +376,8 @@ OptimizerScreen {
 
 #filter-bar.medium #filter-row {
     layout: grid;
-    grid-size: 4 1;
-    grid-columns: 1fr 1fr 1fr 1fr;
+    grid-size: 3 1;
+    grid-columns: 1fr 1fr 1fr;
     grid-gutter: 1 0;
     min-height: 6;
     overflow-x: hidden;
@@ -2629,6 +2612,17 @@ Select.cluster-tab-order {
     display: none;
 }
 
+/* Summary bar below impact chart table */
+#impact-summary-bar {
+    height: auto;
+    padding: 0 1;
+    margin: 0;
+    offset: 0 0;
+    background: $surface;
+    border-top: none;
+    border-bottom: none;
+}
+
 /* --- Impact Filters Modal --- */
 
 .impact-filters-modal-shell {
@@ -2689,4 +2683,11 @@ Select.cluster-tab-order {
 
 .impact-filters-modal-actions {
     margin-top: 0;
+}
+
+/* --- Impact Analysis Dialog (near-fullscreen modal) --- */
+
+.impact-analysis-dialog-shell {
+    width: 95%;
+    max-width: 220;
 }
