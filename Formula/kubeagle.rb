@@ -12,6 +12,25 @@ class Kubeagle < Formula
   # Skip post-install relocation for pre-built native extensions (pydantic-core .so)
   skip_clean "libexec"
 
+  # --- Native extension wheels (installed in post_install to avoid relocation errors) ---
+
+  resource "orjson" do
+    url "https://files.pythonhosted.org/packages/10/43/61a77040ce59f1569edf38f0b9faadc90c8cf7e9bec2e0df51d0132c6bb7/orjson-3.11.5-cp313-cp313-macosx_10_15_x86_64.macosx_11_0_arm64.macosx_10_15_universal2.whl", using: :nounzip
+    sha256 "3b01799262081a4c47c035dd77c1301d40f568f77cc7ec1bb7db5d63b0a01629"
+  end
+
+  resource "ujson-arm" do
+    url "https://files.pythonhosted.org/packages/5b/a4/f611f816eac3a581d8a4372f6967c3ed41eddbae4008d1d77f223f1a4e0a/ujson-5.11.0-cp313-cp313-macosx_11_0_arm64.whl", using: :nounzip
+    sha256 "a31c6b8004438e8c20fc55ac1c0e07dad42941db24176fe9acf2815971f8e752"
+  end
+
+  resource "ujson-intel" do
+    url "https://files.pythonhosted.org/packages/1c/ec/2de9dd371d52c377abc05d2b725645326c4562fc87296a8907c7bcdf2db7/ujson-5.11.0-cp313-cp313-macosx_10_13_x86_64.whl", using: :nounzip
+    sha256 "109f59885041b14ee9569bf0bb3f98579c3fa0652317b355669939e5fc5ede53"
+  end
+
+  # --- Pure-Python sdist resources ---
+
   resource "annotated-doc" do
     url "https://files.pythonhosted.org/packages/57/ba/046ceea27344560984e26a590f90bc7f4a75b06701f653222458922b558c/annotated_doc-0.0.4.tar.gz"
     sha256 "fbcda96e87e9c92ad167c2e53839e57503ecfda18804ea28102353485033faa4"
@@ -130,19 +149,44 @@ class Kubeagle < Formula
   def install
     venv = virtualenv_create(libexec, "python3.13")
 
-    # Install pure-Python resources from sdist
-    sdist_resources = resources.reject { |r| r.name.start_with?("pydantic-core-") }
+    # Install pure-Python resources from sdist (skip native wheel resources)
+    wheel_resources = %w[pydantic-core-arm pydantic-core-intel orjson ujson-arm ujson-intel]
+    sdist_resources = resources.reject { |r| wheel_resources.include?(r.name) }
     venv.pip_install sdist_resources
     venv.pip_install_and_link buildpath
   end
 
   def post_install
-    # Install pydantic-core from pre-built wheel after Homebrew's relocation step
-    # to avoid dylib ID rewriting errors on the native .so extension
+    pip = libexec/"bin/python"
+
+    # Install native extensions from pre-built wheels after Homebrew's relocation step
+    # to avoid dylib ID rewriting errors on .so extensions
+
+    # pydantic-core (arch-specific)
     whl_resource = Hardware::CPU.arm? ? "pydantic-core-arm" : "pydantic-core-intel"
     resource(whl_resource).stage do
       whl = Dir["*.whl"].first
-      system libexec/"bin/python", "-m", "pip", "install", "--no-deps", "--no-compile", whl
+      system pip, "-m", "pip", "install", "--no-deps", "--no-compile", whl
+    end
+
+    # orjson (universal2 wheel covers both arm64 and x86_64)
+    resource("orjson").stage do
+      whl = Dir["*.whl"].first
+      system pip, "-m", "pip", "install", "--no-deps", "--no-compile", whl
+    end
+
+    # ujson (arch-specific)
+    ujson_resource = Hardware::CPU.arm? ? "ujson-arm" : "ujson-intel"
+    resource(ujson_resource).stage do
+      whl = Dir["*.whl"].first
+      system pip, "-m", "pip", "install", "--no-deps", "--no-compile", whl
+    end
+
+    # claude-agent-sdk + all transitive deps (mcp, httpx, cryptography, etc.)
+    # Installed via pip to handle the deep dependency tree (~20+ packages).
+    # ARM Mac only — no Intel Mac wheel is published for the SDK.
+    if Hardware::CPU.arm?
+      system pip, "-m", "pip", "install", "--no-compile", "claude-agent-sdk==0.1.38"
     end
   end
 
