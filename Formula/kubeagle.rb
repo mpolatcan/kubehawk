@@ -34,6 +34,168 @@ class Kubeagle < Formula
     sha256 "77a4ba1a78bb16c67152c35692e7d070e7e09d311f95abdc02e913f762109910"
   end
 
+  # tree-sitter core (arch-specific C extension)
+  resource "tree-sitter-arm" do
+    url "https://files.pythonhosted.org/packages/4e/9c/a278b15e6b263e86c5e301c82a60923fa7c59d44f78d7a110a89a413e640/tree_sitter-0.25.2-cp313-cp313-macosx_11_0_arm64.whl", using: :nounzip
+    sha256 "f5ddcd3e291a749b62521f71fc953f66f5fd9743973fd6dd962b092773569601"
+  end
+
+  resource "tree-sitter-intel" do
+    url "https://files.pythonhosted.org/packages/8c/67/67492014ce32729b63d7ef318a19f9cfedd855d677de5773476caf771e96/tree_sitter-0.25.2-cp313-cp313-macosx_10_13_x86_64.whl", using: :nounzip
+    sha256 "0628671f0de69bb279558ef6b640bcfc97864fe0026d840f872728a86cd6b6cd"
+  end
+
+  # tree-sitter language grammars — required by textual[syntax] for TextArea highlighting
+  resource "tree-sitter-bash-arm" do
+    url "https://files.pythonhosted.org/packages/23/bb/2d2cfbb1f89aaeb1ec892624f069d92d058d06bb66f16b9ec9fb5873ab60/tree_sitter_bash-0.25.1-cp310-abi3-macosx_11_0_arm64.whl", using: :nounzip
+    sha256 "f4a34a6504c7c5b2a9b8c5c4065531dea19ca2c35026e706cf2eeeebe2c92512"
+  end
+
+  resource "tree-sitter-bash-intel" do
+    url "https://files.pythonhosted.org/packages/30/8e/37e7364d9c9c58da89e05c510671d8c45818afd7b31c6939ab72f8dc6c04/tree_sitter_bash-0.25.1-cp310-abi3-macosx_10_9_x86_64.whl", using: :nounzip
+    sha256 "0e6235f59e366d220dde7d830196bed597d01e853e44d8ccd1a82c5dd2500acf"
+  end
+
+  resource "tree-sitter-css-arm" do
+    url "https://files.pythonhosted.org/packages/4d/28/ebcbcbba812d3e407f2f393747330eb8843e0c69d159024e33460b622aab/tree_sitter_css-0.25.0-cp310-abi3-macosx_11_0_arm64.whl", using: :nounzip
+    sha256 "5a2a9c875037ef5f9da57697fb8075086476d42a49d25a88dcca60dfc09bd092"
+  end
+
+  resource "tree-sitter-css-intel" do
+    url "https://files.pythonhosted.org/packages/25/a9/69e556f15ca774638bd79005369213dfbd41995bf032ce81cf3ffe086b8a/tree_sitter_css-0.25.0-cp310-abi3-macosx_10_9_x86_64.whl", using: :nounzip
+    sha256 "ddce6f84eeb0bb2877b4587b07bffb0753040c44d811ed9ab2af978c313beda8"
+  end
+
+  resource "tree-sitter-go-arm" do
+    url "https://files.pythonhosted.org/packages/32/16/dd4cb124b35e99239ab3624225da07d4cb8da4d8564ed81d03fcb3a6ba9f/tree_sitter_go-0.25.0-cp310-abi3-macosx_11_0_arm64.whl", using: :nounzip
+    sha256 "503b81a2b4c31e302869a1de3a352ad0912ccab3df9ac9950197b0a9ceeabd8f"
+  end
+
+  resource "tree-sitter-go-intel" do
+    url "https://files.pythonhosted.org/packages/ca/aa/0984707acc2b9bb461fe4a41e7e0fc5b2b1e245c32820f0c83b3c602957c/tree_sitter_go-0.25.0-cp310-abi3-macosx_10_9_x86_64.whl", using: :nounzip
+    sha256 "b852993063a3429a443e7bd0aa376dd7dd329d595819fabf56ac4cf9d7257b54"
+  end
+
+  resource "tree-sitter-html-arm" do
+    url "https://files.pythonhosted.org/packages/bd/17/827c315deb156bb8cac541da800c4bd62878f50a28b7498fbb722bddd225/tree_sitter_html-0.23.2-cp39-abi3-macosx_11_0_arm64.whl", using: :nounzip
+    sha256 "3d0a83dd6cd1c7d4bcf6287b5145c92140f0194f8516f329ae8b9e952fbfa8ff"
+  end
+
+  resource "tree-sitter-html-intel" do
+    url "https://files.pythonhosted.org/packages/fb/27/b846852b567601c4df765bcb4636085a3260e9f03ae21e0ef2e7c7f957fc/tree_sitter_html-0.23.2-cp39-abi3-macosx_10_9_x86_64.whl", using: :nounzip
+    sha256 "9e1641d5edf5568a246c6c47b947ed524b5bf944664e6473b21d4ae568e28ee9"
+  end
+
+  resource "tree-sitter-java-arm" do
+    url "https://files.pythonhosted.org/packages/57/ef/6406b444e2a93bc72a04e802f4107e9ecf04b8de4a5528830726d210599c/tree_sitter_java-0.23.5-cp39-abi3-macosx_11_0_arm64.whl", using: :nounzip
+    sha256 "24acd59c4720dedad80d548fe4237e43ef2b7a4e94c8549b0ca6e4c4d7bf6e69"
+  end
+
+  resource "tree-sitter-java-intel" do
+    url "https://files.pythonhosted.org/packages/67/21/b3399780b440e1567a11d384d0ebb1aea9b642d0d98becf30fa55c0e3a3b/tree_sitter_java-0.23.5-cp39-abi3-macosx_10_9_x86_64.whl", using: :nounzip
+    sha256 "355ce0308672d6f7013ec913dee4a0613666f4cda9044a7824240d17f38209df"
+  end
+
+  resource "tree-sitter-javascript-arm" do
+    url "https://files.pythonhosted.org/packages/b1/8f/6b4b2bc90d8ab3955856ce852cc9d1e82c81d7ab9646385f0e75ffd5b5d3/tree_sitter_javascript-0.25.0-cp310-abi3-macosx_11_0_arm64.whl", using: :nounzip
+    sha256 "8264a996b8845cfce06965152a013b5d9cbb7d199bc3503e12b5682e62bb1de1"
+  end
+
+  resource "tree-sitter-javascript-intel" do
+    url "https://files.pythonhosted.org/packages/2c/df/5106ac250cd03661ebc3cc75da6b3d9f6800a3606393a0122eca58038104/tree_sitter_javascript-0.25.0-cp310-abi3-macosx_10_9_x86_64.whl", using: :nounzip
+    sha256 "b70f887fb269d6e58c349d683f59fa647140c410cfe2bee44a883b20ec92e3dc"
+  end
+
+  resource "tree-sitter-json-arm" do
+    url "https://files.pythonhosted.org/packages/5c/31/102c15948d97b135611d6a995c97a3933c0e9745f25737723977f58e142c/tree_sitter_json-0.24.8-cp39-abi3-macosx_11_0_arm64.whl", using: :nounzip
+    sha256 "62b4c45b561db31436a81a3f037f71ec29049f4fc9bf5269b6ec3ebaaa35a1cd"
+  end
+
+  resource "tree-sitter-json-intel" do
+    url "https://files.pythonhosted.org/packages/42/41/84866232980fb3cf0cff46f5af2dbb9bfa3324b32614c6a9af3d08926b72/tree_sitter_json-0.24.8-cp39-abi3-macosx_10_9_x86_64.whl", using: :nounzip
+    sha256 "59ac06c6db1877d0e2076bce54a5fddcdd2fc38ca778905662e80fa9ffcea2ab"
+  end
+
+  resource "tree-sitter-markdown-arm" do
+    url "https://files.pythonhosted.org/packages/6d/9b/65eb5e6a8d7791174644854437d35849d9b4e4ed034d54d2c78810eaf1a6/tree_sitter_markdown-0.5.1-cp39-abi3-macosx_11_0_arm64.whl", using: :nounzip
+    sha256 "1ec4cc5d7b0d188bad22247501ab13663bb1bf1a60c2c020a22877fabce8daa9"
+  end
+
+  resource "tree-sitter-markdown-intel" do
+    url "https://files.pythonhosted.org/packages/77/73/b5f88217a526f61080ddd71d554cff6a01ea23fffa584ad9de41ee8d1fe5/tree_sitter_markdown-0.5.1-cp39-abi3-macosx_10_9_x86_64.whl", using: :nounzip
+    sha256 "f00ce3f48f127377983859fcb93caf0693cbc7970f8c41f1e2bd21e4d56bdfd8"
+  end
+
+  resource "tree-sitter-python-arm" do
+    url "https://files.pythonhosted.org/packages/e6/1d/60d8c2a0cc63d6ec4ba4e99ce61b802d2e39ef9db799bdf2a8f932a6cd4b/tree_sitter_python-0.25.0-cp310-abi3-macosx_11_0_arm64.whl", using: :nounzip
+    sha256 "480c21dbd995b7fe44813e741d71fed10ba695e7caab627fb034e3828469d762"
+  end
+
+  resource "tree-sitter-python-intel" do
+    url "https://files.pythonhosted.org/packages/cf/64/a4e503c78a4eb3ac46d8e72a29c1b1237fa85238d8e972b063e0751f5a94/tree_sitter_python-0.25.0-cp310-abi3-macosx_10_9_x86_64.whl", using: :nounzip
+    sha256 "14a79a47ddef72f987d5a2c122d148a812169d7484ff5c75a3db9609d419f361"
+  end
+
+  resource "tree-sitter-regex-arm" do
+    url "https://files.pythonhosted.org/packages/71/06/6b4f995f61952572a94bcfce12d43fc580226551fab9dd0aac4e94465f38/tree_sitter_regex-0.25.0-cp310-abi3-macosx_11_0_arm64.whl", using: :nounzip
+    sha256 "df5713649b89c5758649398053c306c41565f22a6f267cb5ec25596504bcf012"
+  end
+
+  resource "tree-sitter-regex-intel" do
+    url "https://files.pythonhosted.org/packages/2b/b4/12e9ba02bab4ce13d1875f6585c3f2a5816233104d1507ea118950a4f7eb/tree_sitter_regex-0.25.0-cp310-abi3-macosx_10_9_x86_64.whl", using: :nounzip
+    sha256 "3fa11bbd76b29ac8ca2dbf85ad082f9b18ae6352251d805eb2d4191e1706a9d5"
+  end
+
+  resource "tree-sitter-rust-arm" do
+    url "https://files.pythonhosted.org/packages/bf/00/4c400fe94eb3cb141b008b489d582dcd8b41e4168aca5dd8746c47a2b1bc/tree_sitter_rust-0.24.0-cp39-abi3-macosx_11_0_arm64.whl", using: :nounzip
+    sha256 "a0a1a2694117a0e86e156b28ee7def810ec94e52402069bf805be22d43e3c1a1"
+  end
+
+  resource "tree-sitter-rust-intel" do
+    url "https://files.pythonhosted.org/packages/3c/29/0594a6b135d2475d1bb8478029dad127b87856eeb13b23ce55984dd22bb4/tree_sitter_rust-0.24.0-cp39-abi3-macosx_10_9_x86_64.whl", using: :nounzip
+    sha256 "7ea455443f5ab245afd8c5ce63a8ae38da455ef27437b459ce3618a9d4ec4f9a"
+  end
+
+  resource "tree-sitter-sql-arm" do
+    url "https://files.pythonhosted.org/packages/05/45/b2bd5f9919ea15c4ae90a156999101ebd4caa4036babe54efaf9d3e77d55/tree_sitter_sql-0.3.11-cp310-abi3-macosx_11_0_arm64.whl", using: :nounzip
+    sha256 "a33cd6880ab2debef036f80365c32becb740ec79946805598488732b6c515fff"
+  end
+
+  resource "tree-sitter-sql-intel" do
+    url "https://files.pythonhosted.org/packages/32/68/bb80073915dfe1b38935451bc0d65528666c126b2d5878e7140ef9bf9f8a/tree_sitter_sql-0.3.11-cp310-abi3-macosx_10_9_x86_64.whl", using: :nounzip
+    sha256 "cf1b0c401756940bf47544ad7c4cc97373fc0dac118f821820953e7015a115e3"
+  end
+
+  resource "tree-sitter-toml-arm" do
+    url "https://files.pythonhosted.org/packages/92/20/ac8a20805339105fe0bbb6beaa99dbbd1159647760ddd786142364e0b7f2/tree_sitter_toml-0.7.0-cp39-abi3-macosx_11_0_arm64.whl", using: :nounzip
+    sha256 "18be09538e9775cddc0290392c4e2739de2201260af361473ca60b5c21f7bd22"
+  end
+
+  resource "tree-sitter-toml-intel" do
+    url "https://files.pythonhosted.org/packages/ad/4d/1e00a5cd8dba09e340b25aa60a3eaeae584ff5bc5d93b0777169d6741ee5/tree_sitter_toml-0.7.0-cp39-abi3-macosx_10_9_x86_64.whl", using: :nounzip
+    sha256 "b9ae5c3e7c5b6bb05299dd73452ceafa7fa0687d5af3012332afa7757653b676"
+  end
+
+  resource "tree-sitter-xml-arm" do
+    url "https://files.pythonhosted.org/packages/75/f5/31013d04c4e3b9a55e90168cc222a601c84235ba4953a5a06b5cdf8353c4/tree_sitter_xml-0.7.0-cp39-abi3-macosx_11_0_arm64.whl", using: :nounzip
+    sha256 "0674fdf4cc386e4d323cb287d3b072663de0f20a9e9af5d5e09821aae56a9e5c"
+  end
+
+  resource "tree-sitter-xml-intel" do
+    url "https://files.pythonhosted.org/packages/36/1d/6b8974c493973c0c9df2bbf220a1f0a96fa785da81a5a13461faafd1441c/tree_sitter_xml-0.7.0-cp39-abi3-macosx_10_9_x86_64.whl", using: :nounzip
+    sha256 "cc3e516d4c1e0860fb22172c172148debb825ba638971bc48bad15b22e5b0bae"
+  end
+
+  resource "tree-sitter-yaml-arm" do
+    url "https://files.pythonhosted.org/packages/18/0d/15a5add06b3932b5e4ce5f5e8e179197097decfe82a0ef000952c8b98216/tree_sitter_yaml-0.7.2-cp310-abi3-macosx_11_0_arm64.whl", using: :nounzip
+    sha256 "0807b7966e23ddf7dddc4545216e28b5a58cdadedcecca86b8d8c74271a07870"
+  end
+
+  resource "tree-sitter-yaml-intel" do
+    url "https://files.pythonhosted.org/packages/38/29/c0b8dbff302c49ff4284666ffb6f2f21145006843bb4c3a9a85d0ec0b7ae/tree_sitter_yaml-0.7.2-cp310-abi3-macosx_10_9_x86_64.whl", using: :nounzip
+    sha256 "7e269ddcfcab8edb14fbb1f1d34eed1e1e26888f78f94eedfe7cc98c60f8bc9f"
+  end
+
   # --- Pure-Python sdist resources ---
 
   resource "annotated-doc" do
@@ -121,26 +283,6 @@ class Kubeagle < Formula
     sha256 "8dbca0739d487e5bd35ab3ca4b36e11c4078f3a234bfce294b0a0291363404de"
   end
 
-  resource "tree-sitter-arm" do
-    url "https://files.pythonhosted.org/packages/4e/9c/a278b15e6b263e86c5e301c82a60923fa7c59d44f78d7a110a89a413e640/tree_sitter-0.25.2-cp313-cp313-macosx_11_0_arm64.whl", using: :nounzip
-    sha256 "f5ddcd3e291a749b62521f71fc953f66f5fd9743973fd6dd962b092773569601"
-  end
-
-  resource "tree-sitter-intel" do
-    url "https://files.pythonhosted.org/packages/8c/67/67492014ce32729b63d7ef318a19f9cfedd855d677de5773476caf771e96/tree_sitter-0.25.2-cp313-cp313-macosx_10_13_x86_64.whl", using: :nounzip
-    sha256 "0628671f0de69bb279558ef6b640bcfc97864fe0026d840f872728a86cd6b6cd"
-  end
-
-  resource "tree-sitter-yaml-arm" do
-    url "https://files.pythonhosted.org/packages/18/0d/15a5add06b3932b5e4ce5f5e8e179197097decfe82a0ef000952c8b98216/tree_sitter_yaml-0.7.2-cp310-abi3-macosx_11_0_arm64.whl", using: :nounzip
-    sha256 "0807b7966e23ddf7dddc4545216e28b5a58cdadedcecca86b8d8c74271a07870"
-  end
-
-  resource "tree-sitter-yaml-intel" do
-    url "https://files.pythonhosted.org/packages/38/29/c0b8dbff302c49ff4284666ffb6f2f21145006843bb4c3a9a85d0ec0b7ae/tree_sitter_yaml-0.7.2-cp310-abi3-macosx_10_9_x86_64.whl", using: :nounzip
-    sha256 "7e269ddcfcab8edb14fbb1f1d34eed1e1e26888f78f94eedfe7cc98c60f8bc9f"
-  end
-
   resource "textual" do
     url "https://files.pythonhosted.org/packages/f7/08/1e1f705825359590ddfaeda57653bd518c4ff7a96bb2c3239ba1b6fc4c51/textual-8.0.0.tar.gz"
     sha256 "ce48f83a3d686c0fac0e80bf9136e1f8851c653aa6a4502e43293a151df18809"
@@ -175,7 +317,25 @@ class Kubeagle < Formula
     venv = virtualenv_create(libexec, "python3.13")
 
     # Install pure-Python resources from sdist (skip native wheel resources)
-    wheel_resources = %w[pydantic-core-arm pydantic-core-intel orjson ujson-arm ujson-intel claude-agent-sdk tree-sitter-arm tree-sitter-intel tree-sitter-yaml-arm tree-sitter-yaml-intel]
+    wheel_resources = %w[
+      pydantic-core-arm pydantic-core-intel orjson ujson-arm ujson-intel claude-agent-sdk
+      tree-sitter-arm tree-sitter-intel
+      tree-sitter-bash-arm tree-sitter-bash-intel
+      tree-sitter-css-arm tree-sitter-css-intel
+      tree-sitter-go-arm tree-sitter-go-intel
+      tree-sitter-html-arm tree-sitter-html-intel
+      tree-sitter-java-arm tree-sitter-java-intel
+      tree-sitter-javascript-arm tree-sitter-javascript-intel
+      tree-sitter-json-arm tree-sitter-json-intel
+      tree-sitter-markdown-arm tree-sitter-markdown-intel
+      tree-sitter-python-arm tree-sitter-python-intel
+      tree-sitter-regex-arm tree-sitter-regex-intel
+      tree-sitter-rust-arm tree-sitter-rust-intel
+      tree-sitter-sql-arm tree-sitter-sql-intel
+      tree-sitter-toml-arm tree-sitter-toml-intel
+      tree-sitter-xml-arm tree-sitter-xml-intel
+      tree-sitter-yaml-arm tree-sitter-yaml-intel
+    ]
     sdist_resources = resources.reject { |r| wheel_resources.include?(r.name) }
     venv.pip_install sdist_resources
     venv.pip_install_and_link buildpath
@@ -207,18 +367,23 @@ class Kubeagle < Formula
       system pip, "-m", "pip", "install", "--no-deps", "--no-compile", whl
     end
 
-    # tree-sitter (arch-specific — C extension for syntax highlighting)
+    # tree-sitter core (arch-specific — C extension for syntax highlighting)
     ts_resource = Hardware::CPU.arm? ? "tree-sitter-arm" : "tree-sitter-intel"
     resource(ts_resource).stage do
       whl = Dir["*.whl"].first
       system pip, "-m", "pip", "install", "--no-deps", "--no-compile", whl
     end
 
-    # tree-sitter-yaml (arch-specific — YAML grammar for TextArea highlighting)
-    ts_yaml_resource = Hardware::CPU.arm? ? "tree-sitter-yaml-arm" : "tree-sitter-yaml-intel"
-    resource(ts_yaml_resource).stage do
-      whl = Dir["*.whl"].first
-      system pip, "-m", "pip", "install", "--no-deps", "--no-compile", whl
+    # tree-sitter language grammars — required by textual[syntax] for TextArea highlighting.
+    # Textual does NOT bundle grammar .so files; it imports individual tree_sitter_<lang>
+    # packages at runtime via importlib.import_module().
+    ts_lang_packages = %w[bash css go html java javascript json markdown python regex rust sql toml xml yaml]
+    ts_lang_packages.each do |lang|
+      res_name = Hardware::CPU.arm? ? "tree-sitter-#{lang}-arm" : "tree-sitter-#{lang}-intel"
+      resource(res_name).stage do
+        whl = Dir["*.whl"].first
+        system pip, "-m", "pip", "install", "--no-deps", "--no-compile", whl
+      end
     end
 
     # claude-agent-sdk (ARM Mac only — no Intel Mac wheel is published for the SDK)
