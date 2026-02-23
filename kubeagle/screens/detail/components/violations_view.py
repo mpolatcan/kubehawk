@@ -6378,7 +6378,7 @@ class ViolationsView(CustomVertical):
             violations=[violation],
             values_patch_text=values_patch_text,
             template_diff_text=template_diff_text,
-            artifact_key=artifact_key,
+            artifact_key="",
         )
         if not can_apply:
             hint = _bundle_verification_hint(status_note)
@@ -6402,7 +6402,7 @@ class ViolationsView(CustomVertical):
             values_patch=values_patch,
             template_patches=template_patches,
             verification=verification,
-            artifact_key=artifact_key,
+            artifact_key="",
         )
         if not ok:
             await self._open_ai_full_fix_modal_for_single_violation(
@@ -6810,7 +6810,7 @@ class ViolationsView(CustomVertical):
                 values_patch_text=str(payload.get("values_patch_text", "{}\n")),
                 template_diff_text=str(payload.get("template_diff_text", "")),
                 template_patches_json=str(payload.get("template_patches_json", "[]")),
-                artifact_key=str(payload.get("artifact_key", "")),
+                artifact_key="",
             )
             if not can_apply:
                 skipped += 1
@@ -6828,7 +6828,7 @@ class ViolationsView(CustomVertical):
                 values_patch=values_patch,
                 template_patches=template_patches,
                 verification=verification,
-                artifact_key=str(payload.get("artifact_key", "")),
+                artifact_key="",
             )
             if ok:
                 success += 1

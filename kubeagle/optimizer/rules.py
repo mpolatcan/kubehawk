@@ -428,9 +428,9 @@ def _check_missing_startup_probe(chart: dict) -> list[OptimizationViolation]:
         fix_preview={
             "startupProbe": {
                 "httpGet": {"path": "/health", "port": "http"},
-                "initialDelaySeconds": 5,
-                "timeoutSeconds": 3,
-                "periodSeconds": 5,
+                "initialDelaySeconds": 10,
+                "timeoutSeconds": 10,
+                "periodSeconds": 30,
                 "failureThreshold": 30,
             }
         },
@@ -448,9 +448,9 @@ def _check_missing_liveness_probe(chart: dict) -> list[OptimizationViolation]:
         fix_preview={
             "livenessProbe": {
                 "httpGet": {"path": "/health", "port": "http"},
-                "initialDelaySeconds": 15,
-                "timeoutSeconds": 3,
-                "periodSeconds": 10,
+                "initialDelaySeconds": 10,
+                "timeoutSeconds": 10,
+                "periodSeconds": 30,
                 "failureThreshold": 3,
             }
         },
@@ -467,10 +467,10 @@ def _check_missing_readiness_probe(chart: dict) -> list[OptimizationViolation]:
         severity="warning",
         fix_preview={
             "readinessProbe": {
-                "httpGet": {"path": "/ready", "port": "http"},
-                "initialDelaySeconds": 5,
-                "timeoutSeconds": 3,
-                "periodSeconds": 5,
+                "httpGet": {"path": "/health", "port": "http"},
+                "initialDelaySeconds": 10,
+                "timeoutSeconds": 10,
+                "periodSeconds": 30,
                 "failureThreshold": 3,
             }
         },

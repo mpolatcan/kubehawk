@@ -86,7 +86,7 @@ def _preferred_text_area_theme(preferred: str | None) -> str:
         or "light" in raw
     ):
         return "github_light"
-    return "vscode_dark"
+    return "monokai"
 
 
 def _select_supported_language(
@@ -765,10 +765,12 @@ class AIFullFixBulkModal(ModalScreen[AIFullFixBulkModalResult | None]):
                         with CustomVertical(id="ai-full-fix-bulk-values-pane", classes="ai-full-fix-editor-pane"):
                             yield CustomStatic("Updated Values (YAML)", classes="apply-fixes-modal-panel-title ui-section-title", markup=False)
                             with CustomContainer(id="ai-full-fix-bulk-values-wrap"):
-                                yield _CodePreview(
+                                yield TextArea(
                                     text="{}\n",
                                     language="yaml",
                                     theme="monokai",
+                                    show_line_numbers=True,
+                                    highlight_cursor_line=False,
                                     id="ai-full-fix-bulk-values-editor",
                                 )
                                 with CustomContainer(
@@ -944,10 +946,12 @@ class AIFullFixBulkModal(ModalScreen[AIFullFixBulkModalResult | None]):
             return
         bundle = self._bundles[self._selected_chart_key]
         with contextlib.suppress(Exception):
-            bundle.values_preview_text = self.query_one(
+            edited_text = self.query_one(
                 "#ai-full-fix-bulk-values-editor",
-                _CodePreview,
+                TextArea,
             ).text
+            bundle.values_preview_text = edited_text
+            bundle.values_patch_text = edited_text
         rendered_template_preview = self._template_preview_text_from_rendered_sections()
         if rendered_template_preview.strip():
             bundle.template_preview_text = rendered_template_preview
@@ -963,7 +967,7 @@ class AIFullFixBulkModal(ModalScreen[AIFullFixBulkModalResult | None]):
                     continue
                 content = ""
                 with contextlib.suppress(Exception):
-                    content = collapsible.query_one(_CodePreview).text
+                    content = collapsible.query_one(TextArea).text
                 section_body = content.rstrip()
                 if section_body:
                     sections.append(f"# FILE: {file_path}\n{section_body}")
@@ -983,15 +987,13 @@ class AIFullFixBulkModal(ModalScreen[AIFullFixBulkModalResult | None]):
                 bundle.chart_name
             )
         with contextlib.suppress(Exception):
-            self.query_one(
+            editor = self.query_one(
                 "#ai-full-fix-bulk-values-editor",
-                _CodePreview,
-            ).set_code(
-                self._resolve_values_editor_text(bundle),
-                language="yaml",
-                theme=self._active_preview_theme(),
+                TextArea,
             )
+            editor.load_text(self._resolve_values_editor_text(bundle))
         await self._render_template_file_sections(self._resolve_template_preview_text(bundle))
+        self._configure_editor_highlighting()
         self._sync_action_buttons_state()
         self._sync_loading_overlays()
 
@@ -1309,17 +1311,15 @@ class AIFullFixBulkModal(ModalScreen[AIFullFixBulkModalResult | None]):
     def _configure_editor_highlighting(self) -> None:
         editor_theme = self._active_preview_theme()
         with contextlib.suppress(Exception):
-            preview = self.query_one("#ai-full-fix-bulk-values-editor", _CodePreview)
-            preview.set_code(preview.text, language=preview.language, theme=editor_theme)
+            editor = self.query_one("#ai-full-fix-bulk-values-editor", TextArea)
+            editor.language = "yaml"
+            _apply_supported_theme(editor, editor_theme)
         with contextlib.suppress(Exception):
             for node in self.query(".ai-full-fix-template-file-editor"):
-                if not isinstance(node, _CodePreview):
+                if not isinstance(node, TextArea):
                     continue
-                node.set_code(
-                    node.text,
-                    language=node.language,
-                    theme=editor_theme,
-                )
+                node.language = "yaml"
+                _apply_supported_theme(node, editor_theme)
 
     async def _render_template_file_sections(self, template_preview_text: str) -> None:
         sections = await asyncio.to_thread(
@@ -1336,23 +1336,24 @@ class AIFullFixBulkModal(ModalScreen[AIFullFixBulkModalResult | None]):
                         markup=False,
                     )
                 )
-                return
-            editor_theme = self._active_preview_theme()
-            for index, section in enumerate(sections):
-                editor = _CodePreview(
-                    text=section.content,
-                    language=section.language,
-                    theme=editor_theme,
-                    id=f"{self._TEMPLATE_EDITOR_ID_PREFIX}{index}",
-                    classes="ai-full-fix-template-file-editor",
-                )
-                collapsible = CustomCollapsible(
-                    editor,
-                    title=section.file_path,
-                    collapsed=index != 0,
-                    classes="ai-full-fix-template-collapsible",
-                )
-                container.mount(collapsible)
+            else:
+                for index, section in enumerate(sections):
+                    editor = TextArea(
+                        text=section.content,
+                        language=section.language,
+                        theme="monokai",
+                        show_line_numbers=True,
+                        highlight_cursor_line=False,
+                        id=f"{self._TEMPLATE_EDITOR_ID_PREFIX}{index}",
+                        classes="ai-full-fix-template-file-editor",
+                    )
+                    collapsible = CustomCollapsible(
+                        editor,
+                        title=section.file_path,
+                        collapsed=index != 0,
+                        classes="ai-full-fix-template-collapsible",
+                    )
+                    container.mount(collapsible)
         self._configure_editor_highlighting()
 
     def _active_preview_theme(self) -> str:

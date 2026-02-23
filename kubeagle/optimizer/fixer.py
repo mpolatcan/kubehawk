@@ -139,9 +139,9 @@ class FixGenerator:
                 "livenessProbe": self._build_http_probe_fix(
                     default_path="/health",
                     default_port="http",
-                    default_initial_delay=15,
-                    default_timeout=3,
-                    default_period=10,
+                    default_initial_delay=10,
+                    default_timeout=10,
+                    default_period=30,
                     default_failure_threshold=3,
                     probe_settings=probe_settings,
                 )
@@ -151,11 +151,11 @@ class FixGenerator:
             # Missing Readiness Probe - add default
             return {
                 "readinessProbe": self._build_http_probe_fix(
-                    default_path="/ready",
+                    default_path="/health",
                     default_port="http",
-                    default_initial_delay=5,
-                    default_timeout=3,
-                    default_period=5,
+                    default_initial_delay=10,
+                    default_timeout=10,
+                    default_period=30,
                     default_failure_threshold=3,
                     probe_settings=probe_settings,
                 )
@@ -167,9 +167,9 @@ class FixGenerator:
                 "startupProbe": self._build_http_probe_fix(
                     default_path="/health",
                     default_port="http",
-                    default_initial_delay=5,
-                    default_timeout=3,
-                    default_period=5,
+                    default_initial_delay=10,
+                    default_timeout=10,
+                    default_period=30,
                     default_failure_threshold=30,
                     probe_settings=probe_settings,
                 )
